@@ -65,20 +65,20 @@ export function validateEditor(values: EditorValues, action: SaveAction, now = n
   const title = values.title.trim();
   const body = values.body.trim();
   const url = values.url.trim();
-  if (!title) errors.title = '請輸入公告標題。';
-  else if (title.length > 120) errors.title = '標題不可超過 120 個字元。';
-  if (!body) errors.body = '請輸入公告內容。';
-  else if (body.length > 10_000) errors.body = '內容不可超過 10,000 個字元。';
+  if (!title) errors.title = '請輸入公告標題';
+  else if (title.length > 120) errors.title = '標題不可超過 120 個字元';
+  if (!body) errors.body = '請輸入公告內容';
+  else if (body.length > 10_000) errors.body = '內容不可超過 10,000 個字元';
   if (url) {
     try {
       const parsed = new URL(url);
       if (parsed.protocol !== 'https:' || !parsed.hostname || parsed.username || parsed.password) throw new Error();
-    } catch { errors.url = '請使用完整的 HTTPS 網址，例如 https://example.com。'; }
-    if (url.length > 2048) errors.url = '網址不可超過 2,048 個字元。';
+    } catch { errors.url = '請使用完整的 HTTPS 網址，例如 https://example.com'; }
+    if (url.length > 2048) errors.url = '網址不可超過 2,048 個字元';
   }
   let publishAt = action === 'now' ? now : parseTaipeiInput(values.publishTime);
   if (action === 'schedule' && (!publishAt || publishAt.getTime() <= now.getTime())) {
-    errors.publishTime = '請選擇未來的發布時間（台北時間）。';
+    errors.publishTime = '請選擇未來的發布時間（台北時間）';
   }
   if (action === 'draft' && !publishAt) publishAt = now;
   return { errors, data: { title, body, url, publishAt: publishAt ?? now, status: action === 'draft' ? 'draft' : 'scheduled' } as const };

@@ -7,22 +7,33 @@ let env;
 const row = (status = 'scheduled') => ({ title: 'New announcement', body: 'News for students', url: 'https://school.example/news', status,
   publishAt: Timestamp.fromMillis(Date.now() - 10000), publishedAt: null, createdAt: serverTimestamp(), updatedAt: serverTimestamp(), createdBy: 'admin' });
 const ownDevice = () => ({ expoPushToken: 'ExpoPushToken[test-token]', platform: 'ios', enabled: true, updatedAt: serverTimestamp() });
-const adminDb = () => env.authenticatedContext('admin', { admin: true }).firestore();
-const ownerDb = () => env.authenticatedContext('owner', { admin: true, accountManager: true }).firestore();
+const adminDb = () => googleDb('admin', 'admin@example.com');
+const ownerDb = () => googleDb('owner', 'owner@example.com', { role: 'owner' });
+const superDb = () => googleDb('super', 'super@example.com');
 const googleDb = (uid = 'invited-admin', email = 'teacher@example.com', claims = {}) => env.authenticatedContext(uid, {
   email, email_verified: true, firebase: { sign_in_provider: 'google.com' }, ...claims,
 }).firestore();
-const accountRow = (email, overrides = {}) => ({ email, displayName: '', enabled: true,
+const accountRow = (email, overrides = {}) => ({ email, displayName: '', enabled: true, role: 'admin',
   createdAt: serverTimestamp(), updatedAt: serverTimestamp(), createdBy: 'owner', ...overrides });
 const userDb = () => env.authenticatedContext('device-user', { firebase: { sign_in_provider: 'anonymous' } }).firestore();
 const publicDb = () => env.unauthenticatedContext().firestore();
 
 before(async () => { env = await initializeTestEnvironment({ projectId: 'demo-ck-announcements', firestore: { rules: readFileSync(resolve(__dirname, '../../firestore.rules'), 'utf8') } }); });
-beforeEach(async () => { await env.clearFirestore(); });
+beforeEach(async () => {
+  await env.clearFirestore();
+  await seedAccount('owner@example.com', { role: 'owner' });
+  await seedAccount('super@example.com', { role: 'super_admin' });
+  await seedAccount('admin@example.com');
+});
 after(async () => { await env.cleanup(); });
 async function seed(id, status) {
   await env.withSecurityRulesDisabled(async (context) => {
     await setDoc(doc(context.firestore(), 'announcements', id), { ...row(status), createdAt: Timestamp.now(), updatedAt: Timestamp.now(), publishedAt: status === 'published' ? Timestamp.now() : null });
+  });
+}
+async function seedAccount(email, overrides = {}) {
+  await env.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'adminAccounts', email), accountRow(email, overrides));
   });
 }
 
@@ -37,7 +48,7 @@ test('public feed requires published query; scheduled data remains inaccessible 
   await assertSucceeds(getDocs(collection(adminDb(), 'announcements')));
 });
 
-test('only claimed admins create valid drafts and schedules; direct publication and forged metadata fail', async () => {
+test('enabled admins create valid drafts and schedules; direct publication and forged metadata fail', async () => {
   await assertSucceeds(setDoc(doc(adminDb(), 'announcements/draft'), row('draft')));
   await assertSucceeds(setDoc(doc(adminDb(), 'announcements/scheduled'), row()));
   await assertFails(setDoc(doc(userDb(), 'announcements/unauthorized'), row()));
@@ -77,7 +88,15 @@ test('devices can manage only their own valid registration; admin cannot list to
   await assertSucceeds(deleteDoc(doc(userDb(), 'devices/device-user')));
 });
 
-test('only the owner with both rooted claims can manage invitations', async () => {
+test('owner and super admin create admin and super admin accounts; only managers list accounts', async () => {
+  for (const [uid, manager] of [['owner', ownerDb()], ['super', superDb()]]) {
+    await assertSucceeds(getDocs(collection(manager, 'adminAccounts')));
+    for (const role of ['admin', 'super_admin']) {
+      const email = `${uid}-${role}@example.com`;
+      await assertSucceeds(setDoc(doc(manager, 'adminAccounts', email), accountRow(email, { role, createdBy: uid })));
+    }
+    await assertFails(setDoc(doc(manager, 'adminAccounts', `${uid}-owner@example.com`), accountRow(`${uid}-owner@example.com`, { role: 'owner', createdBy: uid })));
+  }
   const owner = ownerDb();
   const email = 'teacher@example.com';
   await assertSucceeds(setDoc(doc(owner, 'adminAccounts', email), accountRow(email)));
@@ -94,6 +113,36 @@ test('only the owner with both rooted claims can manage invitations', async () =
   await assertSucceeds(deleteDoc(doc(owner, 'adminAccounts', email)));
 });
 
+test('super admins modify and delete admins but only owners can modify or delete super admins', async () => {
+  const manager = superDb();
+  await assertSucceeds(updateDoc(doc(manager, 'adminAccounts/admin@example.com'), { enabled: false, updatedAt: serverTimestamp() }));
+  await assertSucceeds(deleteDoc(doc(manager, 'adminAccounts/admin@example.com')));
+  await seedAccount('peer@example.com', { role: 'super_admin' });
+  for (const patch of [{ enabled: false }, { displayName: 'Changed' }, { role: 'admin' }]) {
+    await assertFails(updateDoc(doc(manager, 'adminAccounts/peer@example.com'), { ...patch, updatedAt: serverTimestamp() }));
+  }
+  await assertFails(deleteDoc(doc(manager, 'adminAccounts/peer@example.com')));
+  await assertSucceeds(updateDoc(doc(ownerDb(), 'adminAccounts/peer@example.com'), { enabled: false, updatedAt: serverTimestamp() }));
+  await assertSucceeds(deleteDoc(doc(ownerDb(), 'adminAccounts/peer@example.com')));
+});
+
+test('owner accounts cannot be changed or deleted by any client; role changes and self management fail', async () => {
+  for (const manager of [ownerDb(), superDb(), adminDb()]) {
+    await assertFails(deleteDoc(doc(manager, 'adminAccounts/owner@example.com')));
+    for (const patch of [{ enabled: false }, { displayName: 'Changed' }, { role: 'admin' }]) {
+      await assertFails(updateDoc(doc(manager, 'adminAccounts/owner@example.com'), { ...patch, updatedAt: serverTimestamp() }));
+    }
+    await assertFails(setDoc(doc(manager, 'adminAccounts/owner@example.com'), accountRow('owner@example.com')));
+    await assertFails(updateDoc(doc(manager, 'adminAccounts/admin@example.com'), { role: 'super_admin', updatedAt: serverTimestamp() }));
+  }
+  for (const [uid, email, manager] of [['owner', 'owner@example.com', ownerDb()], ['super', 'super@example.com', superDb()]]) {
+    await assertFails(updateDoc(doc(manager, 'adminAccounts', email), { enabled: false, updatedAt: serverTimestamp() }));
+    await assertFails(deleteDoc(doc(manager, 'adminAccounts', email)));
+    const missingSelf = googleDb(uid, `${uid}-missing@example.com`, uid === 'owner' ? { role: 'owner' } : {});
+    await assertFails(setDoc(doc(missingSelf, 'adminAccounts', `${uid}-missing@example.com`), accountRow(`${uid}-missing@example.com`, { createdBy: uid })));
+  }
+});
+
 test('invitation writes enforce normalized addresses, exact fields and immutable creation metadata', async () => {
   const owner = ownerDb();
   const email = 'teacher@example.com';
@@ -103,9 +152,15 @@ test('invitation writes enforce normalized addresses, exact fields and immutable
     accountRow(email, { createdBy: 'another-owner' }),
     accountRow(email, { createdAt: Timestamp.fromMillis(1) }),
     accountRow(email, { updatedAt: Timestamp.fromMillis(1) }),
+    accountRow(email, { role: null }), accountRow(email, { role: 'owner' }),
   ];
   for (const invalid of invalidRows) await assertFails(setDoc(doc(owner, 'adminAccounts', email), invalid));
   await assertFails(setDoc(doc(owner, 'adminAccounts/Teacher@example.com'), accountRow('Teacher@example.com')));
+  for (const invalidEmail of ['no-domain', '.teacher@example.com', 'teacher.@example.com', 'teacher..name@example.com', 'teacher@-example.com', 'teacher@example-.com', 'teacher@localhost', '老師@example.com', `${'a'.repeat(243)}@example.com`]) {
+    await assertFails(setDoc(doc(owner, 'adminAccounts', invalidEmail), accountRow(invalidEmail)));
+  }
+  const { role, ...missingRole } = accountRow(email);
+  await assertFails(setDoc(doc(owner, 'adminAccounts', email), missingRole));
   await assertSucceeds(setDoc(doc(owner, 'adminAccounts', email), accountRow(email, { displayName: 'x'.repeat(120) })));
   for (const patch of [
     { email: 'different@example.com' }, { createdBy: 'another-owner' },
@@ -196,16 +251,62 @@ test('unverified or non-Google invitations confer no admin rights; invitation ca
   await assertFails(updateDoc(doc(invitedManager, 'adminAccounts', email), { displayName: 'Escalated', updatedAt: serverTimestamp() }));
 });
 
-test('rooted owner and existing admin claims remain authorized independently of invitations', async () => {
-  const owner = googleDb('owner', 'owner@example.com', { admin: true, accountManager: true });
-  const admin = googleDb('admin', 'admin@example.com', { admin: true });
-  await assertSucceeds(setDoc(doc(owner, 'adminAccounts/owner@example.com'), accountRow('owner@example.com', { enabled: false })));
-  await assertSucceeds(setDoc(doc(owner, 'adminAccounts/admin@example.com'), accountRow('admin@example.com', { enabled: false })));
+test('rooted owner claims remain independent; stale admin and super claims cannot bypass membership revocation', async () => {
   await seed('draft', 'draft');
-  await assertSucceeds(getDoc(doc(owner, 'announcements/draft')));
-  await assertSucceeds(getDoc(doc(admin, 'announcements/draft')));
-  await assertSucceeds(getDocs(collection(owner, 'adminAccounts')));
-  await assertFails(getDocs(collection(admin, 'adminAccounts')));
-  await assertSucceeds(deleteDoc(doc(owner, 'adminAccounts/owner@example.com')));
-  await assertSucceeds(getDocs(collection(owner, 'adminAccounts')));
+  await seedAccount('owner@example.com', { role: 'owner', enabled: false });
+  for (const claims of [{ role: 'owner' }, { admin: true, accountManager: true }]) {
+    const owner = googleDb('owner', 'owner@example.com', claims);
+    await assertSucceeds(getDoc(doc(owner, 'announcements/draft')));
+    await assertSucceeds(getDocs(collection(owner, 'adminAccounts')));
+    await assertFails(deleteDoc(doc(owner, 'adminAccounts/owner@example.com')));
+  }
+  for (const claims of [{ admin: true }, { role: 'admin' }, { role: 'super_admin' }, { admin: 'true', accountManager: true }]) {
+    const stale = googleDb('stale', 'stale@example.com', claims);
+    await assertFails(getDoc(doc(stale, 'announcements/draft')));
+    await assertFails(getDocs(collection(stale, 'adminAccounts')));
+  }
+  const stale = googleDb('admin', 'admin@example.com', { admin: true });
+  await assertSucceeds(getDoc(doc(stale, 'announcements/draft')));
+  await assertSucceeds(deleteDoc(doc(ownerDb(), 'adminAccounts/admin@example.com')));
+  await assertFails(getDoc(doc(stale, 'announcements/draft')));
+});
+
+test('legacy invitations remain announcement admins and cannot be promoted through client updates', async () => {
+  const email = 'legacy@example.com';
+  const { role, ...legacy } = accountRow(email);
+  await env.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), 'adminAccounts', email), legacy);
+  });
+  const member = googleDb('legacy', email);
+  await seed('draft', 'draft');
+  await assertSucceeds(getDoc(doc(member, 'announcements/draft')));
+  await assertFails(getDocs(collection(member, 'adminAccounts')));
+  await assertSucceeds(updateDoc(doc(superDb(), 'adminAccounts', email), { displayName: 'Legacy', updatedAt: serverTimestamp() }));
+  for (const manager of [ownerDb(), superDb()]) {
+    await assertFails(updateDoc(doc(manager, 'adminAccounts', email), { role: 'super_admin', updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(doc(manager, 'adminAccounts', email), { role: 'admin', updatedAt: serverTimestamp() }));
+  }
+  await assertSucceeds(deleteDoc(doc(superDb(), 'adminAccounts', email)));
+  await assertFails(getDoc(doc(member, 'announcements/draft')));
+});
+
+test('membership owner roles never grant access and disabled or deleted super admins lose manager access', async () => {
+  await seed('draft', 'draft');
+  await seedAccount('forged-owner@example.com', { role: 'owner' });
+  const forged = googleDb('forged-owner', 'forged-owner@example.com');
+  await assertSucceeds(getDoc(doc(forged, 'adminAccounts/forged-owner@example.com')));
+  await assertFails(getDoc(doc(forged, 'announcements/draft')));
+  await assertFails(getDocs(collection(forged, 'adminAccounts')));
+  const manager = superDb();
+  await assertSucceeds(getDoc(doc(manager, 'announcements/draft')));
+  await assertSucceeds(getDocs(collection(manager, 'adminAccounts')));
+  await assertSucceeds(updateDoc(doc(ownerDb(), 'adminAccounts/super@example.com'), { enabled: false, updatedAt: serverTimestamp() }));
+  await assertFails(getDoc(doc(manager, 'announcements/draft')));
+  await assertFails(getDocs(collection(manager, 'adminAccounts')));
+  await assertFails(setDoc(doc(manager, 'adminAccounts/denied@example.com'), accountRow('denied@example.com', { createdBy: 'super' })));
+  await assertSucceeds(updateDoc(doc(ownerDb(), 'adminAccounts/super@example.com'), { enabled: true, updatedAt: serverTimestamp() }));
+  await assertSucceeds(getDocs(collection(manager, 'adminAccounts')));
+  await assertSucceeds(deleteDoc(doc(ownerDb(), 'adminAccounts/super@example.com')));
+  await assertFails(getDoc(doc(manager, 'announcements/draft')));
+  await assertFails(getDocs(collection(manager, 'adminAccounts')));
 });

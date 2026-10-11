@@ -17,6 +17,6 @@ export function Icon({ name, size = 20 }: { name: 'bell' | 'plus' | 'clock' | 'c
 }
 
 export function Brand() {
-  return <div className="brand"><span className="brand-mark" aria-hidden="true">CK<span>+</span></span><span className="brand-copy">CK APP<span>ADMIN CONSOLE</span></span></div>;
+  return <div className="brand"><img className="brand-mark" src={`${import.meta.env.BASE_URL}icon.png`} alt="" /><span className="brand-copy">CK APP<span>ADMIN CONSOLE</span></span></div>;
 }
 

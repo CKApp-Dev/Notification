@@ -1,53 +1,74 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function hasAdminClaim() {
-      return request.auth != null && request.auth.token.get('admin', false) == true;
+    function isOwner() {
+      return request.auth != null && (request.auth.token.get('role', '') == 'owner'
+        || (request.auth.token.get('admin', false) == true
+          && request.auth.token.get('accountManager', false) == true));
     }
     function isAccountManager() {
-      return hasAdminClaim() && request.auth.token.get('accountManager', false) == true;
+      return isOwner() || memberRole() == 'super_admin';
+    }
+    function validEmail(email) {
+      return email is string && email.size() <= 254
+        && email.matches('[a-z0-9_%+-]+(\\.[a-z0-9_%+-]+)*@[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+');
     }
     function isVerifiedGoogle() {
       return request.auth != null
         && request.auth.token.get('email_verified', false) == true
         && request.auth.token.get('firebase', {}).get('sign_in_provider', '') == 'google.com'
         && request.auth.token.get('email', '') is string
-        && request.auth.token.get('email', '').size() > 0;
+        && validEmail(request.auth.token.get('email', '').lower());
     }
     function ownAccountPath() {
       return /databases/$(database)/documents/adminAccounts/$(request.auth.token.email.lower());
     }
-    function isInvitedAdmin() {
+    function memberRole() {
       return isVerifiedGoogle() && exists(ownAccountPath())
-        && get(ownAccountPath()).data.enabled == true;
+        && get(ownAccountPath()).data.enabled == true
+        && get(ownAccountPath()).data.email == request.auth.token.email.lower()
+        && get(ownAccountPath()).data.get('role', 'admin') in ['admin', 'super_admin']
+        ? get(ownAccountPath()).data.get('role', 'admin') : '';
     }
     function isAdmin() {
-      return hasAdminClaim() || isInvitedAdmin();
+      return isOwner() || memberRole() in ['admin', 'super_admin'];
     }
     match /adminAccounts/{email} {
       function validAccount(data) {
         return data.keys().hasAll(['email', 'displayName', 'enabled', 'createdAt', 'updatedAt', 'createdBy'])
-          && data.keys().hasOnly(['email', 'displayName', 'enabled', 'createdAt', 'updatedAt', 'createdBy'])
-          && email.size() > 0 && email == email.lower()
+          && data.keys().hasOnly(['email', 'displayName', 'enabled', 'createdAt', 'updatedAt', 'createdBy', 'role'])
+          && validEmail(email)
           && data.email == email
+          && data.get('role', 'admin') in ['admin', 'super_admin']
           && data.displayName is string && data.displayName.size() <= 120
           && data.enabled is bool
           && data.createdAt is timestamp && data.updatedAt is timestamp
           && data.createdBy is string;
       }
+      function isOtherAccount() {
+        return email != request.auth.token.get('email', '').lower();
+      }
+      function canModifyAccount() {
+        return isAccountManager() && isOtherAccount()
+          && (resource.data.get('role', 'admin') == 'admin'
+            || (isOwner() && resource.data.get('role', 'admin') == 'super_admin'));
+      }
       allow get: if isAccountManager()
         || (isVerifiedGoogle() && email == request.auth.token.email.lower());
       allow list: if isAccountManager();
       allow create: if isAccountManager() && validAccount(request.resource.data)
+        && isOtherAccount()
+        && request.resource.data.keys().hasAll(['role'])
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.createdAt == request.time
         && request.resource.data.updatedAt == request.time;
-      allow update: if isAccountManager() && validAccount(request.resource.data)
+      allow update: if canModifyAccount() && validAccount(request.resource.data)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role'])
         && request.resource.data.email == resource.data.email
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.createdBy == resource.data.createdBy
         && request.resource.data.updatedAt == request.time;
-      allow delete: if isAccountManager();
+      allow delete: if canModifyAccount();
     }
     function validAnnouncement(data) {
       return data.keys().hasAll(['title', 'body', 'url', 'status', 'publishAt', 'publishedAt', 'createdAt', 'updatedAt', 'createdBy'])

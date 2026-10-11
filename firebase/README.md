@@ -6,15 +6,21 @@ The independent admin repository is `CKApp-Dev/Notification`, hosted at https://
 
 ## Publication and delivery
 
-Administrators sign in with Google. A verified Google account receives announcement access through an enabled email invitation in `adminAccounts`; existing `admin: true` Firebase Auth custom claims also grant access. They create drafts/schedules in `announcements/{id}` with `title`, `body`, `url`, `status`, `publishAt`, `publishedAt`, `createdAt`, `updatedAt`, and `createdBy`. Dates are Firestore timestamps; empty links or HTTPS links are allowed. Public reads require `status == published`, ordered by `publishAt` descending, limited to 50 by the app. Drafts/schedules stay private even after their publication date passes. Admins can edit pending rows or archive published rows, without rewriting or republishing history.
+Administrators sign in with Google. Verified Google accounts receive announcement access through enabled `admin` or `super_admin` email memberships in `adminAccounts`. Owners receive access through trusted Firebase Auth custom claims. A standalone `admin: true` claim no longer grants access. They create drafts/schedules in `announcements/{id}` with `title`, `body`, `url`, `status`, `publishAt`, `publishedAt`, `createdAt`, `updatedAt`, and `createdBy`. Dates are Firestore timestamps; empty links or HTTPS links are allowed. Public reads require `status == published`, ordered by `publishAt` descending, limited to 50 by the app. Drafts/schedules stay private even after their publication date passes. Admins can edit pending rows or archive published rows, without rewriting or republishing history.
 
 ## Administrator accounts
 
-The website's owner invites Google accounts by email before they sign in. Invitations live at `adminAccounts/{normalizedLowercaseEmail}` and contain exactly `email` (matching the document ID), `displayName` (up to 120 characters, empty allowed), `enabled` (boolean), `createdAt`, `updatedAt` (Firestore timestamps), and `createdBy` (the creating owner's UID). Creation uses server timestamps for both dates and the current owner's UID. Updates preserve `email`, `createdAt`, and `createdBy`, and set `updatedAt` with a server timestamp. Owners may delete invitations.
+Owners and super administrators invite Google accounts by email before they sign in. Memberships live at `adminAccounts/{normalizedLowercaseEmail}` and contain exactly `email` (matching the document ID), `displayName` (up to 120 characters, empty allowed), `enabled` (boolean), `role`, `createdAt`, `updatedAt` (Firestore timestamps), and `createdBy` (the creating manager's UID). Creation requires `role: admin` or `role: super_admin`, server timestamps for both dates, and the current manager's UID. Existing rows without `role` are treated as `admin` and can keep the omitted field when edited. Updates preserve `role`, `email`, `createdAt`, and `createdBy`, and set `updatedAt` with a server timestamp.
 
-Only an account with both server-issued custom claims `admin: true` and `accountManager: true` can list or manage invitations. An invitation cannot confer account-management privileges. Verified Google users can get their own normalized-email invitation, including a disabled or missing row, but cannot list invitations or read other accounts. Their Google sign-in token must have `email_verified: true` and provider `google.com`.
+| Role | Announcement management | Account management |
+| --- | --- | --- |
+| `owner` | All announcement operations allowed by the publication policy | Create admin/super admin accounts; edit, disable, or delete other admin/super admin accounts |
+| `super_admin` | All announcement operations allowed by the publication policy | Create admin/super admin accounts; edit, disable, or delete admin accounts |
+| `admin` | All announcement operations allowed by the publication policy | None |
 
-Enabling an invitation grants announcement access without a token refresh; disabling or deleting it revokes access on subsequent Firestore server requests using the same signed-in account. Already downloaded data cannot be recalled. The website listens to the user's own invitation to update its interface. Existing server-issued `admin: true` claims remain independent of invitations, so disabling an invitation does not revoke a claim holder. An authorized Firebase Auth operator must remove those claims separately. The owner's server-issued claims keep account management accessible even if their own invitation is disabled or deleted.
+Only an owner can edit, disable, or delete a super administrator. Owner membership rows cannot be edited, disabled, replaced, or deleted by any website client, including an owner. Clients cannot create owner rows, change an existing role, or manage their own account. Owner privileges require the server-issued custom claim `role: owner`, or both legacy claims `admin: true` and `accountManager: true`. An `owner` membership row only protects the account; it never grants owner privileges. The private bootstrap script is responsible for registering owners through the Admin SDK.
+
+Owners and enabled super administrators can list/read the account directory. Other verified Google users can get only their own normalized-email membership, including a disabled or missing row. Membership-based access requires `email_verified: true` and provider `google.com`. Enabling a membership grants its permissions without a token refresh; disabling or deleting it revokes announcement and account-management access on subsequent Firestore server requests using the same signed-in account. Previously downloaded data cannot be recalled. The website listens to the user's own membership to update its interface. Stale `admin` or `super_admin` custom claims cannot bypass revocation. Owner claims remain independent of membership state. Removing an account here revokes website access; it does not delete the Google identity or Firebase Authentication user.
 
 Each worker pass sequentially:
 
@@ -45,7 +51,7 @@ npm test
 npm run test:emulator
 ```
 
-The emulator always uses `demo-ck-announcements`, never production. Tests cover due dates, concurrent workers, draft privacy, history immutability, invitation access and revocation, prevention of account privilege escalation, own-device access, retry checkpoints, receipt cleanup, archives during delivery, and more than 500 devices resuming across runs. They use a fake Expo gateway and send no real notifications. The test SDK's older gRPC dependency is overridden with compatible `@grpc/grpc-js` 1.14.6+ to address advisories.
+The emulator always uses `demo-ck-announcements`, never production. Tests cover due dates, concurrent workers, draft privacy, history immutability, the owner/super administrator/admin permission matrix, protected owner and peer accounts, self-management prevention, legacy memberships, immediate revocation despite stale claims, own-device access, retry checkpoints, receipt cleanup, archives during delivery, and more than 500 devices resuming across runs. Pure bootstrap tests verify owner registration and claim cleanup without connecting to Firebase. They use a fake Expo gateway and send no real notifications. The test SDK's older gRPC dependency is overridden with compatible `@grpc/grpc-js` 1.14.6+ to address advisories.
 
 ## Deploy Firestore and configure mobile
 
@@ -125,16 +131,18 @@ GOOGLE_CLOUD_PROJECT=ck-app-database npm --prefix firebase/worker run start
 
 Android FCM credentials are separate from the scheduled worker identity. The optional `scripts/configure-android-push.mjs` helper prints its plan by default and requires explicit key-creation/upload approval before apply mode. It creates a dedicated messaging-only identity, keeps its private key in memory, and uploads it only to the verified `@ckappofficial/ck-app` Expo account. It refuses unrelated existing credentials and never revokes keys automatically. iOS APNs credentials and Apple provisioning must be configured separately; see the mobile repository's announcement setup guide.
 
-## Bootstrap an account manager privately
+## Bootstrap administrator roles privately
 
-Ordinary administrators should use email invitations in the website. To bootstrap or recover an owner, have the intended owner sign into the website once with Google. An authorized operator with Firebase Auth administration access then runs:
+Ordinary administrators should use email memberships in the website. To bootstrap or recover an owner, have the intended owner sign into the website once with Google. An authorized operator with Firebase Auth administration and Firestore write access then runs:
 
 ```sh
 cd firebase
 gcloud auth application-default login
-npm run grant-admin -- --project ck-app-database --email owner@example.com --account-manager
+npm run grant-admin -- --project ck-app-database --email owner@example.com --role owner
 ```
 
-The script rejects disabled, unverified, or non-Google accounts and merges existing custom claims. `--account-manager` grants both `admin: true` and `accountManager: true`; omitting it grants durable announcement-admin access only. Ordinary Google sign-in never grants access without an enabled invitation or a server-issued claim. Sign out and sign in again after a custom-claim change to refresh the ID token. Firebase CLI login alone does not configure Admin SDK credentials. The scheduled worker's service account cannot perform this grant.
+`--account-manager` remains an alias for `--role owner`. `--role super_admin` and `--role admin` create or update enabled memberships; omitting the role defaults to `admin`. The script rejects disabled, unverified, or non-Google target accounts. Before enabling any target membership, it scans Firebase Auth and registers every existing rooted owner with a protected `role: owner` row. It then writes the target membership and sets owner claims (`role: owner`, `admin: true`, `accountManager: true`) or removes all three privilege claims for nonowners, preserving unrelated claims. It refuses to demote existing rooted or registered owners. The owner scan and registry writes must succeed before it grants a super administrator.
+
+Before deploying these rules to an existing installation, run this bootstrap for the current owner to register protected owner rows, and give every former standalone `admin: true` claim holder an enabled membership. Existing membership rows without a role continue as announcement-only admins. Create super administrator memberships after the owner registry is populated. Ordinary Google sign-in never grants access without an enabled admin/super admin membership or rooted owner claims. Sign out and sign in again after custom-claim changes to refresh the ID token. Firebase CLI login alone does not configure Admin SDK credentials. The scheduled worker's service account cannot perform these grants.
 
 Inspect Actions logs and `notificationJobs` / `notificationReceipts` in the Firebase console for operational failures. After fixing a failed job's cause, an authorized operator may reset `status: pending`, `errorAttempts: 0`, `nextAttemptAt` to the current server timestamp, and pending recipients' attempts to zero. Preserve accepted recipients and token deduplication records to avoid replaying successful delivery.

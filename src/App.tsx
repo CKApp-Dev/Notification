@@ -3,22 +3,22 @@ import { GoogleAuthProvider, getRedirectResult, onIdTokenChanged, signInWithPopu
 import { addDoc, collection, doc, limit, onSnapshot, orderBy, query, runTransaction, serverTimestamp, Timestamp, type DocumentData } from 'firebase/firestore';
 import { auth, db, friendlyError, missingConfig, redirectEnabled } from './firebase';
 import { Brand, Icon } from './ui';
-import { deriveAccess } from './accounts-domain';
+import { deriveAccess, ROLE_LABELS, type AccountRole } from './accounts-domain';
 import AccountManagement from './AccountManagement';
 import { editorFor, emptyEditor, formatDate, STATUS_LABELS, validateEditor, type Announcement, type AnnouncementStatus, type EditorValues, type SaveAction } from './domain';
 
 function Gate({ children }: { children: ReactNode }) {
-  return <div className="gate-page"><header className="gate-header"><Brand /><span className="header-label">公告管理平台</span></header><main className="gate-wrap"><div className="gate-intro"><p className="eyebrow">CONNECTED CAMPUS</p><h1>讓重要消息，<br />傳遞到位。</h1><p>從一則校園消息到每個人的手機，<br />在這裡建立、排程與管理 CK APP 公告。</p><div className="gate-points"><span><Icon name="file" />編輯公告</span><span><Icon name="clock" />預約發布</span><span><Icon name="bell" />手機通知</span></div><span className="gate-grid" aria-hidden="true" /></div><section className="gate-card">{children}</section></main><footer className="gate-footer">CK APP · 你的校園助理<span>僅供授權管理員使用</span></footer></div>;
+  return <div className="gate-page"><header className="gate-header"><Brand /><span className="header-label">公告管理平台</span></header><main className="gate-wrap"><div className="gate-intro"><p className="eyebrow">CONNECTED CAMPUS</p><h1>讓重要消息，<br />傳遞到位。</h1><p>從一則校園消息到每個人的手機，<br />在這裡建立、排程與管理 CK APP 公告</p><div className="gate-points"><span><Icon name="file" />編輯公告</span><span><Icon name="clock" />預約發布</span><span><Icon name="bell" />手機通知</span></div><span className="gate-grid" aria-hidden="true" /></div><section className="gate-card">{children}</section></main><footer className="gate-footer">CK APP · 你的校園助理<span>僅供授權管理員使用</span></footer></div>;
 }
 
 function SetupRequired() {
   return <Gate><div className="gate-icon"><Icon name="shield" size={25} /></div><p className="eyebrow">SETUP REQUIRED</p><h2>完成專案連線</h2><p className="muted">這個管理平台尚未連接 Firebase。請由專案管理者填入網站的 Firebase 設定，再重新部署。</p><div className="setup-detail"><strong>需要的公開設定</strong><code>{missingConfig.join(' · ')}</code></div><p className="small muted">設定方式請參閱網站專案的 README.md。完成連線後，即可使用管理員 Google 帳戶登入。</p></Gate>;
 }
 
-type Session = { status: 'loading' | 'signed-out' | 'admin' | 'denied' | 'error'; user: User | null; canManageAccounts: boolean };
+type Session = { status: 'loading' | 'signed-out' | 'admin' | 'denied' | 'error'; user: User | null; canManageAccounts: boolean; role: AccountRole | null };
 
 function AuthenticatedApp() {
-  const [session, setSession] = useState<Session>({ status: 'loading', user: null, canManageAccounts: false });
+  const [session, setSession] = useState<Session>({ status: 'loading', user: null, canManageAccounts: false, role: null });
   const [authError, setAuthError] = useState('');
   const [signingIn, setSigningIn] = useState(false);
   const [popupBlocked, setPopupBlocked] = useState(false);
@@ -33,8 +33,8 @@ function AuthenticatedApp() {
     const unsubscribe = onIdTokenChanged(auth!, async user => {
       const current = ++revision;
       unsubscribeInvitation(); unsubscribeInvitation = () => {};
-      if (!user) { observedUid.current = null; setSession({ status: 'signed-out', user: null, canManageAccounts: false }); return; }
-      if (observedUid.current !== user.uid) setSession({ status: 'loading', user, canManageAccounts: false });
+      if (!user) { observedUid.current = null; setSession({ status: 'signed-out', user: null, canManageAccounts: false, role: null }); return; }
+      if (observedUid.current !== user.uid) setSession({ status: 'loading', user, canManageAccounts: false, role: null });
       observedUid.current = user.uid;
       try {
         const result = await user.getIdTokenResult();
@@ -42,19 +42,20 @@ function AuthenticatedApp() {
         const identity = {
           adminClaim: result.claims.admin,
           accountManagerClaim: result.claims.accountManager,
+          roleClaim: result.claims.role,
           email: typeof result.claims.email === 'string' ? result.claims.email : user.email,
           emailVerified: result.claims.email_verified === true,
           signInProvider: result.signInProvider,
         };
         const access = deriveAccess({ ...identity, invitation: null });
-        if (access.isAdmin || !access.invitationEmail) {
-          setSession({ status: access.isAdmin ? 'admin' : 'denied', user, canManageAccounts: access.canManageAccounts });
+        if (access.isOwner || !access.invitationEmail) {
+          setSession({ status: access.isAdmin ? 'admin' : 'denied', user, canManageAccounts: access.canManageAccounts, role: access.role });
           setAuthError('');
           return;
         }
         setSession(previous => previous.status === 'admin' && previous.user?.uid === user.uid
-          ? { ...previous, user, canManageAccounts: false }
-          : { status: 'loading', user, canManageAccounts: false });
+          ? { ...previous, user, canManageAccounts: false, role: null }
+          : { status: 'loading', user, canManageAccounts: false, role: null });
         let serverConfirmed = false;
         unsubscribeInvitation = onSnapshot(doc(db!, 'adminAccounts', access.invitationEmail), { includeMetadataChanges: true }, snapshot => {
           if (!active || current !== revision) return;
@@ -63,19 +64,19 @@ function AuthenticatedApp() {
           serverConfirmed = true;
           const data = snapshot.data();
           const invitation = data && typeof data.email === 'string' && typeof data.enabled === 'boolean'
-            ? { email: data.email, enabled: data.enabled } : null;
+            ? { email: data.email, enabled: data.enabled, role: data.role } : null;
           const liveAccess = deriveAccess({ ...identity, invitation });
           setAuthError('');
-          setSession({ status: liveAccess.isAdmin ? 'admin' : 'denied', user, canManageAccounts: liveAccess.canManageAccounts });
+          setSession({ status: liveAccess.isAdmin ? 'admin' : 'denied', user, canManageAccounts: liveAccess.canManageAccounts, role: liveAccess.role });
         }, error => {
           if (!active || current !== revision) return;
           setAuthError(friendlyError(error));
-          setSession({ status: 'error', user, canManageAccounts: false });
+          setSession({ status: 'error', user, canManageAccounts: false, role: null });
         });
       } catch (error) {
-        if (active && current === revision) { setAuthError(friendlyError(error)); setSession({ status: 'error', user, canManageAccounts: false }); }
+        if (active && current === revision) { setAuthError(friendlyError(error)); setSession({ status: 'error', user, canManageAccounts: false, role: null }); }
       }
-    }, error => { if (active) { unsubscribeInvitation(); setAuthError(friendlyError(error)); setSession({ status: 'error', user: auth!.currentUser, canManageAccounts: false }); } });
+    }, error => { if (active) { unsubscribeInvitation(); setAuthError(friendlyError(error)); setSession({ status: 'error', user: auth!.currentUser, canManageAccounts: false, role: null }); } });
     return () => { active = false; unsubscribe(); unsubscribeInvitation(); };
   }, [authRetry]);
   useEffect(() => {
@@ -102,9 +103,9 @@ function AuthenticatedApp() {
     try { await session.user?.getIdToken(true); setAuthRetry(previous => previous + 1); } catch (error) { setAuthError(friendlyError(error)); }
     finally { setSigningIn(false); }
   }
-  if (session.status === 'admin' && session.user) return <div className="dashboard"><header className="app-header"><Brand /><div className="header-divider" /><nav className="admin-navigation" aria-label="管理導覽"><button className={page === 'announcements' ? 'navigation-tab active' : 'navigation-tab'} aria-current={page === 'announcements' ? 'page' : undefined} onClick={() => setPage('announcements')}>公告中心</button>{session.canManageAccounts && <button className={page === 'accounts' ? 'navigation-tab active' : 'navigation-tab'} aria-current={page === 'accounts' ? 'page' : undefined} onClick={() => setPage('accounts')}>帳戶管理</button>}</nav><div className="user-area"><span className="admin-tag"><Icon name="shield" size={14} />{session.canManageAccounts ? '擁有者' : '管理員'}</span><span className="user-email" title={session.user.email ?? ''}>{session.user.email}</span><button className="icon-button" onClick={() => void refresh()} aria-label="重新確認權限" disabled={signingIn}><Icon name="refresh" size={17} /></button><button className="icon-button" onClick={() => void logout()} aria-label="登出"><Icon name="logout" /></button></div></header><div hidden={page !== 'announcements'}><Dashboard user={session.user} authError={authError} /></div>{session.canManageAccounts && <div hidden={page !== 'accounts'}><AccountManagement user={session.user} /></div>}</div>;
+  if (session.status === 'admin' && session.user) return <div className="dashboard"><header className="app-header"><Brand /><div className="header-divider" /><nav className="admin-navigation" aria-label="管理導覽"><button className={page === 'announcements' ? 'navigation-tab active' : 'navigation-tab'} aria-current={page === 'announcements' ? 'page' : undefined} onClick={() => setPage('announcements')}>公告中心</button>{session.canManageAccounts && <button className={page === 'accounts' ? 'navigation-tab active' : 'navigation-tab'} aria-current={page === 'accounts' ? 'page' : undefined} onClick={() => setPage('accounts')}>帳戶管理</button>}</nav><div className="user-area"><span className="admin-tag"><Icon name="shield" size={14} />{ROLE_LABELS[session.role ?? 'admin']}</span><span className="user-email" title={session.user.email ?? ''}>{session.user.email}</span><button className="icon-button" onClick={() => void refresh()} aria-label="重新確認權限" disabled={signingIn}><Icon name="refresh" size={17} /></button><button className="icon-button" onClick={() => void logout()} aria-label="登出"><Icon name="logout" /></button></div></header><div hidden={page !== 'announcements'}><Dashboard user={session.user} authError={authError} /></div>{session.canManageAccounts && session.role && <div hidden={page !== 'accounts'}><AccountManagement user={session.user} role={session.role} /></div>}</div>;
   return <Gate><div className="gate-icon"><Icon name="shield" size={25} /></div><p className="eyebrow">ADMIN ACCESS</p><h2>{session.status === 'denied' ? '此帳戶尚未獲得授權' : session.status === 'loading' ? '正在確認登入狀態' : session.status === 'error' ? '無法確認管理員權限' : '歡迎回來'}</h2>
-    {session.status === 'loading' ? <p className="muted" role="status">正在安全連線，請稍候…</p> : session.status === 'signed-out' ? <><p className="muted">使用已授權的 Google 帳戶登入，<br />開始管理 App 的最新消息。</p><button className="button primary login-button" onClick={() => void login()} disabled={signingIn}><span className="google-icon" aria-hidden="true">G</span>{signingIn ? '正在登入…' : '使用 Google 帳戶登入'}<Icon name="arrow" /></button>{popupBlocked && redirectEnabled && <button className="button secondary full" onClick={() => void login(true)} disabled={signingIn}>改用整頁登入</button>}<p className="small muted gate-note">登入後仍需具備專案管理者授予的管理員權限。</p></> : <><p className="muted">{session.user?.email && <strong className="account-email">{session.user.email}<br /></strong>}請聯絡專案管理者確認此帳戶的管理員權限。授權完成後可重新確認。</p><button className="button primary full" onClick={() => void refresh()} disabled={signingIn}><Icon name="refresh" />重新確認權限</button><button className="button secondary full" onClick={() => void logout()}><Icon name="logout" />登出並切換帳戶</button></>}
+    {session.status === 'loading' ? <p className="muted" role="status">正在安全連線，請稍候…</p> : session.status === 'signed-out' ? <><p className="muted">使用已授權的 Google 帳戶登入，<br />開始管理 App 的最新消息</p><button className="button primary login-button" onClick={() => void login()} disabled={signingIn}><span className="google-icon" aria-hidden="true">G</span>{signingIn ? '正在登入…' : '使用 Google 帳戶登入'}<Icon name="arrow" /></button>{popupBlocked && redirectEnabled && <button className="button secondary full" onClick={() => void login(true)} disabled={signingIn}>改用整頁登入</button>}<p className="small muted gate-note">登入後仍需具備專案管理者授予的管理員權限。</p></> : <><p className="muted">{session.user?.email && <strong className="account-email">{session.user.email}<br /></strong>}請聯絡專案管理者確認此帳戶的管理員權限。授權完成後可重新確認。</p><button className="button primary full" onClick={() => void refresh()} disabled={signingIn}><Icon name="refresh" />重新確認權限</button><button className="button secondary full" onClick={() => void logout()}><Icon name="logout" />登出並切換帳戶</button></>}
     {authError && <p role="alert" className="notice error">{authError}</p>}
   </Gate>;
 }
@@ -236,9 +237,9 @@ function Dashboard({ user, authError }: { user: User; authError: string }) {
           {actionError && <p className="notice error" role="alert">{actionError}</p>}{success && <p className="notice success" role="status"><Icon name="check" size={17} />{success}</p>}
           <div className="editor-actions">{editable ? <><button type="submit" className="button secondary" disabled={busy}>儲存草稿</button><div className="publish-actions"><button type="button" className="button secondary" onClick={() => void save('now')} disabled={busy}>提交發布</button><button type="button" className="button primary" onClick={() => void save('schedule')} disabled={busy}><Icon name="clock" size={17} />{saving ? '正在儲存…' : '排程發布'}</button></div></> : selected?.status === 'published' ? <button type="button" className="button secondary" onClick={() => void archive()} disabled={busy}><Icon name="archive" />封存公告</button> : null}</div>
         </form>
-        <div className="preview-section"><div className="preview-heading"><h3>App 顯示預覽</h3><span>{dirty && !editable ? '尚未儲存的內容' : '內容樣式參考'}</span></div><div className="phone-preview"><div className="preview-app-title"><span className="preview-small-mark">CK</span><span>最新消息</span><span className="preview-sample">預覽</span></div><article className="preview-card"><p className="preview-date"><Icon name="bell" size={14} />{values.publishTime ? formatDate(validateEditor(values, 'draft').data.publishAt) : '發布日期'}</p><h4>{values.title.trim() || '你的公告標題'}</h4><p className={!values.body.trim() ? 'placeholder' : ''}>{values.body.trim() || '公告內容將顯示在這裡。讓重要資訊清楚、簡單地被看見。'}</p>{values.url.trim() && <span className="preview-link">查看詳細資訊 <Icon name="arrow" size={15} /></span>}</article></div></div>
+        <div className="preview-section"><div className="preview-heading"><h3>App 顯示預覽</h3><span>{dirty && !editable ? '尚未儲存的內容' : '內容樣式參考'}</span></div><div className="phone-preview"><div className="preview-app-title"><img className="preview-small-mark" src={`${import.meta.env.BASE_URL}icon.png`} alt="CK APP" /><span>最新消息</span><span className="preview-sample">預覽</span></div><article className="preview-card"><p className="preview-date"><Icon name="bell" size={14} />{values.publishTime ? formatDate(validateEditor(values, 'draft').data.publishAt) : '發布日期'}</p><h4>{values.title.trim() || '你的公告標題'}</h4><p className={!values.body.trim() ? 'placeholder' : ''}>{values.body.trim() || '公告內容將顯示在這裡。讓重要資訊清楚、簡單地被看見。'}</p>{values.url.trim() && <span className="preview-link">查看詳細資訊 <Icon name="arrow" size={15} /></span>}</article></div></div>
       </section></div>
-    </main><footer className="workspace-footer">CK APP · 公告管理平台<span>為校園生活，多想一步。</span></footer>
+    </main><footer className="workspace-footer">CK APP · Announcement Panel</footer>
   </>;
 }
 

@@ -1,6 +1,6 @@
 # CK APP Announcement Admin
 
-A standalone React, TypeScript, and Vite website that builds to `dist/` and deploys through GitHub Pages to [notification.cksc.tw](https://notification.cksc.tw/). Announcements are stored in the `announcements` Firestore collection shared with the app. Owners can invite announcement administrators from the Account Management page. This website is a separate project and does not add a sign-in flow for app users.
+A standalone React, TypeScript, and Vite website that builds to `dist/` and deploys through GitHub Pages to [notification.cksc.tw](https://notification.cksc.tw/). Announcements are stored in the `announcements` Firestore collection shared with the app. Owners and super administrators can create administrator accounts from the Account Management page. This website is a separate project and does not add a sign-in flow for app users.
 
 ## Development and Validation
 
@@ -30,36 +30,47 @@ The workflow uses the official `checkout@v7`, `setup-node@v7`, `configure-pages@
 1. In Firebase Console → Authentication → Sign-in method, enable Google and set the project's support email address.
 2. Under Authentication → Settings → Authorized domains, add `notification.cksc.tw`. Add the domains of any additional website mirrors as well. For local development, also add `localhost` and `127.0.0.1`; new projects may not authorize local domains automatically.
 3. The first owner must sign in with Google to create a Firebase Authentication account. Accounts without authorization or an invitation will see an insufficient permissions screen.
-4. A project administrator must use the Firebase Admin SDK from a trusted server to set both custom claims, `admin: true` and `accountManager: true`, for the owner's UID. The backend project provides an authorization script. The website cannot grant these roles itself and does not authorize users based on their email domain.
-5. After granting the owner role, click **Recheck Permissions** on the insufficient permissions screen or sign in again. A permissions refresh button is also available at the top right when signed in. Once permissions refresh, the **Account Management** tab appears. Both `admin` and `accountManager` must be the boolean value `true` to manage invitations.
-6. Owners invite regular announcement administrators by entering their Google email address in **Account Management**. No additional custom claims are required. The website listens for changes to the verified Google account's own invitation record; backend Firestore Rules enforce the actual read and write permissions.
+4. Bootstrap the first owner from a trusted environment with `npm --prefix firebase run grant-admin -- --project ck-app-database --email owner@example.com --role owner`. The owner must first sign in with Google. This writes a protected owner registry record and server-issued owner claims. The website cannot create owners and does not authorize users by email domain.
+5. Click **Recheck Permissions** or sign in again after bootstrapping. Owners and enabled super administrators see **Account Management**. The header shows the current role.
+6. Owners and super administrators create accounts for the exact Google email address and choose `admin` or `super_admin`. Invitees need no custom claims; Firestore Rules enforce the account's live role and enabled status.
+
+Before enabling super administrators on an existing deployment, run the updated bootstrap command for the current owner. It registers all existing owners with `role: owner` so they appear as protected accounts. Legacy owners with both strict boolean claims `admin: true` and `accountManager: true` retain owner access. An `admin: true` claim alone no longer grants access: create an enabled account record for each existing announcement administrator, or run the trusted helper with `--role admin` to migrate that user. Refresh permissions after deploying the rules and website together.
 
 Google sign-in uses a popup by default. If the browser blocks it, the website prompts the user to allow popups and try again. Setting `VITE_FIREBASE_ENABLE_REDIRECT=true` enables a full-page sign-in fallback button, but **first configure a same-origin auth helper, reverse proxy, or appropriate Firebase Hosting setup according to Firebase's third-party storage restrictions guide**. A standard GitHub Pages static domain does not automatically provide the `/__/auth/*` helper, so redirect sign-in is disabled by default. See the documentation for [Google sign-in](https://firebase.google.com/docs/auth/web/google-signin), [redirect configuration](https://firebase.google.com/docs/auth/web/redirect-best-practices), and [custom claims](https://firebase.google.com/docs/auth/admin/custom-claims).
 
 ## Account Management and Invitations
 
-- In **Account Management**, owners can create invitations, filter enabled or disabled invitations, edit display names, disable or restore access, and remove invitations after confirmation.
-- An invitation grants eligibility to sign in. It does not send an email or create a Firebase Authentication user in advance. Share the website link with the invitee directly; their authentication account is created when they first sign in with that Google account.
-- Email addresses are trimmed and converted to lowercase, with a maximum length of 254 characters. Paths, control characters, internal whitespace, and invalid formats are rejected. Dots and `+` aliases in Google email addresses are not merged, so enter the exact email address shown after sign-in.
-- Display names are optional and limited to 120 characters. They appear only in the invitation list and do not change the invitee's Google profile.
-- Regular invited administrators can manage announcements only. They cannot read other invitations, invite users, change their own permissions, or set passwords.
-- For administrators authorized solely through an invitation, disabling or removing that invitation immediately revokes database administration access. When the website receives the change to the user's own invitation, it clears the announcement editor and administration views. Removing an invitation does not delete the Google account, Firebase Authentication user, or existing announcements.
-- The current owner appears in a protected card, is not listed as a regular invited administrator, and cannot invite themselves. The owner's existing project roles are independent of the invitation list, so disabling or removing an invitation does not revoke those roles. Owner role changes must be handled in a trusted Firebase Admin environment.
+| Role | Announcements | Create admin / super_admin | Manage or delete admin | Manage or delete super_admin | Delete owner |
+| --- | --- | --- | --- | --- | --- |
+| `owner` | Yes | Yes | Yes | Yes | Never |
+| `super_admin` | Yes | Yes | Yes | No | Never |
+| `admin` | Yes | No | No | No | Never |
 
-Invitations are stored at `adminAccounts/{normalizedLowercaseEmail}`, with the document ID matching `email`:
+- Account management includes editing display names, disabling or restoring access, and deleting site account records after confirmation. No one can manage their own record in the website. Existing roles are immutable; only the trusted bootstrap helper can change them. Only an owner can disable, edit, or delete a super administrator, preventing peer removal through an intermediate role change.
+- Creating an account grants eligibility to sign in. It does not send email or create a Firebase Authentication user in advance. Share the website link with the invitee; their authentication account is created when they first sign in with that Google account.
+- Email addresses are trimmed and converted to lowercase, with a maximum length of 254 characters. Invalid formats, paths, control characters, and internal whitespace are rejected. Dots and `+` aliases are preserved, so enter the exact email address shown after sign-in.
+- Display names are optional, limited to 120 characters, and affect only the account list.
+- Regular administrators can manage announcements only. They cannot list accounts, create users, change permissions, or set passwords.
+- Disabling or deleting any non-owner account revokes database administration access on subsequent server requests, including with an existing sign-in token. The website watches the user's own record and clears administration views when access is revoked. Previously downloaded data cannot be recalled. Deleting site access does not delete the Google account, Firebase Authentication identity, or existing announcements.
+- Owner records are created only by the trusted bootstrap helper. Their roles and records cannot be changed, disabled, or deleted through the website, including by another owner. A record marked `owner` does not itself confer owner access; owner privileges require trusted claims.
+
+Accounts are stored at `adminAccounts/{normalizedLowercaseEmail}`, with the document ID matching `email`:
 
 ```ts
 {
   email: string,
   displayName: string,
+  role: 'owner' | 'super_admin' | 'admin',
   enabled: boolean,
   createdAt: Timestamp,
   updatedAt: Timestamp,
-  createdBy: string // Firebase Auth UID of the owner who created the invitation
+  createdBy: string // Firebase Auth UID of the creator
 }
 ```
 
-New invitations use server timestamps for `createdAt` and `updatedAt`. Updates change only the display name or enabled status, along with `updatedAt`, preserving the original email address, creation time, and creator.
+New accounts use server timestamps for `createdAt` and `updatedAt`. Website updates change only the display name or enabled status, along with `updatedAt`, preserving the email, role, creation time, and creator. Legacy invitations without a `role` remain regular administrators. Unknown roles fail closed.
+
+The supplied `public/icon.png` is used as the website brand image, announcement preview image, favicon, Apple touch icon, and social page image. Local asset paths respect Vite's configured deployment base path.
 
 ## Announcement Workflow
 
