@@ -56,6 +56,8 @@ The scheduled worker needs Firestore IAM access only. Use Workload Identity Fede
 
 An authorized project operator runs the following setup locally after the admin repository exists. Project/IAM administration permissions are needed for this one-time setup; the worker receives only data access. These commands create IAM resources and enable free authentication/data APIs, without deploying a paid compute service.
 
+The fixed-project helper `scripts/configure-github-wif.mjs --owner-id 198431597` prints a reviewable plan by default. Apply mode accepts an operator's short-lived OAuth bearer token only through piped stdin and preserves existing IAM bindings. Its one-time operator permissions require Workload Identity Pool Admin, Project IAM Admin, and Service Account Admin; these setup roles are separate from the worker's Firestore-only role and can be removed afterward.
+
 ```sh
 PROJECT_ID='ck-app-database'
 GITHUB_REPOSITORY='ChrisSun0731/CK-App-Admin'
@@ -112,6 +114,8 @@ GOOGLE_CLOUD_PROJECT=ck-app-database npm --prefix firebase/worker run start
 ```
 
 ## Grant an administrator privately
+
+Android FCM credentials are separate from the scheduled worker identity. The optional `scripts/configure-android-push.mjs` helper prints its plan by default and requires explicit key-creation/upload approval before apply mode. It creates a dedicated messaging-only identity, keeps its private key in memory, and uploads it only to the verified `@ckappofficial/ck-app` Expo account. It refuses unrelated existing credentials and never revokes keys automatically. iOS APNs credentials and Apple provisioning must be configured separately; see the mobile repository's announcement setup guide.
 
 Have the intended administrator sign into the website once with Google. An authorized operator with Firebase Auth administration access then runs:
 
