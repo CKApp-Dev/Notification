@@ -1,8 +1,8 @@
 # Scheduled announcements with GitHub Actions
 
-The app and admin website share Firestore in `ck-app-database`. A Node worker in `firebase/worker` publishes scheduled announcements and sends remote device notifications. GitHub Actions runs the worker every five minutes, so this design does not require Cloud Functions, Cloud Scheduler, or a Firebase Blaze upgrade. Firestore and Authentication remain subject to Spark quotas. Standard GitHub-hosted runners are free for public repositories; private repositories have an Actions allowance. See [Firebase plans](https://firebase.google.com/docs/projects/billing/firebase-pricing-plans) and [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
+The app and admin website share Firestore in `ck-app-database`. A Node worker in `firebase/worker` publishes scheduled announcements and sends remote device notifications. Once configured, GitHub Actions checks for work approximately every five minutes, so this design does not require Cloud Functions, Cloud Scheduler, or a Firebase Blaze upgrade. Firestore and Authentication remain subject to Spark quotas. Standard GitHub-hosted runners are free for public repositories; private repositories have an Actions allowance. See [Firebase plans](https://firebase.google.com/docs/projects/billing/firebase-pricing-plans) and [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
 
-The independent admin repository is `ChrisSun0731/CK-App-Admin`: its root contains the website and this entire `firebase/` directory lives beneath it. Copy `github-actions/announcements.yml` to that repository's `.github/workflows/announcements.yml` and keep `main` as its default branch.
+The independent admin repository is `CKApp-Dev/Notification`, hosted at https://notification.cksc.tw. Its root contains the website and this entire `firebase/` directory lives beneath it. Copy `github-actions/announcements.yml` to that repository's `.github/workflows/announcements.yml` and keep `main` as its default branch.
 
 ## Publication and delivery
 
@@ -64,13 +64,13 @@ The scheduled worker needs Firestore IAM access only. Use Workload Identity Fede
 
 An authorized project operator runs the following setup locally after the admin repository exists. Project/IAM administration permissions are needed for this one-time setup; the worker receives only data access. These commands create IAM resources and enable free authentication/data APIs, without deploying a paid compute service.
 
-The fixed-project helper `scripts/configure-github-wif.mjs --owner-id 198431597` prints a reviewable plan by default. Apply mode accepts an operator's short-lived OAuth bearer token only through piped stdin and preserves existing IAM bindings. Its one-time operator permissions require Workload Identity Pool Admin, Project IAM Admin, and Service Account Admin; these setup roles are separate from the worker's Firestore-only role and can be removed afterward.
+The fixed-project helper `scripts/configure-github-wif.mjs --owner-id 176317633` prints a reviewable plan by default and pins the repository to ID `1413866797` and its organization owner to ID `176317633`. Apply mode accepts an operator's short-lived OAuth bearer token only through piped stdin and preserves existing IAM bindings. Its one-time operator permissions require Workload Identity Pool Admin, Project IAM Admin, and Service Account Admin; these setup roles are separate from the worker's Firestore-only role and can be removed afterward.
 
 ```sh
 PROJECT_ID='ck-app-database'
-GITHUB_REPOSITORY='ChrisSun0731/CK-App-Admin'
+GITHUB_REPOSITORY='CKApp-Dev/Notification'
 GITHUB_REPOSITORY_ID="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.id')"
-GITHUB_OWNER_ID="$(gh api users/ChrisSun0731 --jq '.id')"
+GITHUB_OWNER_ID="$(gh api "repos/${GITHUB_REPOSITORY}" --jq '.owner.id')"
 GITHUB_WORKFLOW_REF="${GITHUB_REPOSITORY}/.github/workflows/announcements.yml@refs/heads/main"
 SERVICE_ACCOUNT="ck-announcements@${PROJECT_ID}.iam.gserviceaccount.com"
 

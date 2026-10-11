@@ -1,6 +1,6 @@
 name: Deploy admin website to GitHub Pages
 
-# This workflow runs from the standalone CK-App-Admin repository root.
+# This workflow runs from the standalone CKApp-Dev/Notification repository root.
 on:
   push:
     branches: [main]

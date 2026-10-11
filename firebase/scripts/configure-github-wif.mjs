@@ -10,8 +10,9 @@ import { resolve } from 'node:path';
 
 const PROJECT_ID = 'ck-app-database';
 const PROJECT_NUMBER = '253500838094';
-const REPOSITORY = 'ChrisSun0731/CK-App-Admin';
-const REPOSITORY_ID = '1413830142';
+const REPOSITORY = 'CKApp-Dev/Notification';
+const REPOSITORY_ID = '1413866797';
+const REPOSITORY_OWNER_ID = '176317633';
 const POOL_ID = 'github-announcements';
 const PROVIDER_ID = 'github-actions';
 const ACCOUNT_ID = 'ck-announcements';
@@ -34,12 +35,16 @@ export function configuration(ownerId) {
   if (typeof ownerId !== 'string' || !/^[1-9][0-9]{0,19}$/.test(ownerId)) {
     throw new ConfigurationError('--owner-id must be the numeric GitHub repository owner ID.');
   }
+  if (ownerId !== REPOSITORY_OWNER_ID) {
+    throw new ConfigurationError('--owner-id must match the approved CKApp-Dev organization ID 176317633.');
+  }
   const pool = `projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL_ID}`;
   const provider = `${pool}/providers/${PROVIDER_ID}`;
   const serviceAccount = `${ACCOUNT_ID}@${PROJECT_ID}.iam.gserviceaccount.com`;
   const attributeCondition = [
     `assertion.repository_id == '${REPOSITORY_ID}'`,
     `assertion.repository_owner_id == '${ownerId}'`,
+    `assertion.repository == '${REPOSITORY}'`,
     "assertion.ref == 'refs/heads/main'",
     `assertion.workflow_ref == '${REPOSITORY}/.github/workflows/announcements.yml@refs/heads/main'`,
     "assertion.event_name in ['schedule', 'workflow_dispatch']",
@@ -51,9 +56,10 @@ export function configuration(ownerId) {
     principal: `principalSet://iam.googleapis.com/${pool}/attribute.repository_id/${REPOSITORY_ID}`,
     providerConfig: {
       displayName: 'CK announcements GitHub Actions',
-      description: 'Only the approved CK-App-Admin main-branch announcement workflow.',
+      description: 'Only the approved CKApp-Dev/Notification main-branch announcement workflow.',
       attributeMapping: {
         'google.subject': 'assertion.sub',
+        'attribute.repository': 'assertion.repository',
         'attribute.repository_id': 'assertion.repository_id',
         'attribute.repository_owner_id': 'assertion.repository_owner_id',
         'attribute.ref': 'assertion.ref',
@@ -239,7 +245,7 @@ async function provision(config, token) {
     () => request(IAM, config.pool),
     async () => waitForOperation(request, IAM, await request(IAM,
       `projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools?workloadIdentityPoolId=${POOL_ID}`,
-      'POST', { displayName: 'CK announcements GitHub', description: 'Dedicated to the CK-App-Admin announcement workflow.' }), config),
+      'POST', { displayName: 'CK announcements GitHub', description: 'Dedicated to the CKApp-Dev/Notification announcement workflow.' }), config),
   );
   activeResource(pool, config.pool, 'workload pool');
   verifyDedicatedPool(await listProviders(request, config), config.provider);

@@ -1,6 +1,6 @@
 # CK APP Announcement Admin
 
-A standalone React, TypeScript, and Vite website that builds to `dist/` and deploys to [GitHub Pages](https://ChrisSun0731.github.io/CK-App-Admin/). Announcements are stored in the `announcements` Firestore collection shared with the app. Owners can invite announcement administrators from the Account Management page. This website is a separate project and does not add a sign-in flow for app users.
+A standalone React, TypeScript, and Vite website that builds to `dist/` and deploys through GitHub Pages to [notification.cksc.tw](https://notification.cksc.tw/). Announcements are stored in the `announcements` Firestore collection shared with the app. Owners can invite announcement administrators from the Account Management page. This website is a separate project and does not add a sign-in flow for app users.
 
 ## Development and Validation
 
@@ -11,24 +11,24 @@ npm run build
 npm run dev
 ```
 
-Run these commands from the root of the standalone `ChrisSun0731/CK-App-Admin` repository. If you are working from the app repository, enter `admin/` first.
+Run these commands from the root of the standalone `CKApp-Dev/Notification` repository. The mobile app lives in a separate repository.
 
 By default, the website uses the public Firebase web configuration in `src/firebase-config.json` for the `ck-app-database` project. Analytics is not used. To switch Firebase projects, update that configuration or copy `.env.example` to `.env.local` and set the `VITE_FIREBASE_*` overrides. Environment variables are embedded at build time, so changes require rebuilding and redeploying the website. These settings are public browser configuration; never include service account private keys in the website.
 
 ## GitHub Pages Deployment
 
-1. Place the website source at the root of `ChrisSun0731/CK-App-Admin`, with `package.json`, `src/`, `index.html`, and `.github/workflows/pages.yml` at their expected paths. Exclude `node_modules/`, `dist/`, local environment files, and `.openai/`.
+1. Place the website source at the root of `CKApp-Dev/Notification`, with `package.json`, `src/`, `index.html`, and `.github/workflows/pages.yml` at their expected paths. Exclude `node_modules/`, `dist/`, local environment files, and `.openai/`.
 2. In the GitHub repository, go to Settings → Pages → Build and deployment and select **GitHub Actions**.
 3. Push to `main` or manually run the **Deploy admin website to GitHub Pages** workflow. It installs dependencies, runs tests, builds the website, uploads `dist/`, and deploys to the `github-pages` environment.
-4. The workflow sets Vite's `ADMIN_BASE_PATH` using the `base_path` output from `actions/configure-pages`, supporting both the `/CK-App-Admin/` subpath and custom domains. For a manual build, run `ADMIN_BASE_PATH=/CK-App-Admin/ npm run build`. The local default is `/`.
-5. Ensure Firebase's Authorized domains list includes `chrissun0731.github.io`. Enter the hostname only, without a path.
+4. Set the Pages custom domain to `notification.cksc.tw`. The workflow sets Vite's `ADMIN_BASE_PATH` using the `base_path` output from `actions/configure-pages`, supporting the custom domain at `/` and the default `/Notification/` subpath. For a manual custom-domain build, run `ADMIN_BASE_PATH=/ npm run build`. The local default is `/`.
+5. Ensure Firebase's Authorized domains list includes `notification.cksc.tw`. Enter the hostname only, without a path.
 
 The workflow uses the official `checkout@v7`, `setup-node@v7`, `configure-pages@v5`, `upload-pages-artifact@v4`, and `deploy-pages@v4` actions. See [custom GitHub Pages workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages), [checkout releases](https://github.com/actions/checkout/releases), and [setup-node releases](https://github.com/actions/setup-node/releases). Building and deploying the website does not require a Firebase service account. Configure credentials for the scheduled publisher separately; never include them in public configuration or website build artifacts.
 
 ## Sign-In and Administrator Permissions
 
 1. In Firebase Console → Authentication → Sign-in method, enable Google and set the project's support email address.
-2. Under Authentication → Settings → Authorized domains, add `chrissun0731.github.io`. Add the domains of any additional website mirrors as well. For local development, also add `localhost` and `127.0.0.1`; new projects may not authorize local domains automatically.
+2. Under Authentication → Settings → Authorized domains, add `notification.cksc.tw`. Add the domains of any additional website mirrors as well. For local development, also add `localhost` and `127.0.0.1`; new projects may not authorize local domains automatically.
 3. The first owner must sign in with Google to create a Firebase Authentication account. Accounts without authorization or an invitation will see an insufficient permissions screen.
 4. A project administrator must use the Firebase Admin SDK from a trusted server to set both custom claims, `admin: true` and `accountManager: true`, for the owner's UID. The backend project provides an authorization script. The website cannot grant these roles itself and does not authorize users based on their email domain.
 5. After granting the owner role, click **Recheck Permissions** on the insufficient permissions screen or sign in again. A permissions refresh button is also available at the top right when signed in. Once permissions refresh, the **Account Management** tab appears. Both `admin` and `accountManager` must be the boolean value `true` to manage invitations.
@@ -67,8 +67,8 @@ New invitations use server timestamps for `createdAt` and `updatedAt`. Updates c
 - All date and time inputs are interpreted in `Asia/Taipei` (UTC+8), regardless of the administrator's browser time zone.
 - **Save Draft** creates or updates a `draft` without publishing it automatically.
 - **Schedule Publication** saves the announcement as `scheduled` with a future `publishAt`.
-- **Publish Now** also saves the announcement as `scheduled`, with `publishAt` set to the current time. The website does not set `published` directly; a trusted scheduled backend handles publication and push notifications.
-- The backend uses a GitHub Actions schedule to check for due announcements approximately every five minutes, set their status to `published`, and record `publishedAt`. The app retrieves published announcements and receives device notifications, subject to device permissions, connectivity, and system delivery. GitHub schedules may be delayed or skipped, so publication times are not guaranteed. **Publish Now** also waits for the next scheduled run. See [GitHub scheduled event limitations](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+- **Submit for Publication (提交發布)** also saves the announcement as `scheduled`, with `publishAt` set to the current time. The save confirmation means the announcement is queued; it appears in the app only after the trusted backend sets it to `published`. Publication and push delivery services must be configured separately.
+- Once configured, the backend uses a GitHub Actions schedule to check for due announcements approximately every five minutes, set their status to `published`, and record `publishedAt`. The app retrieves published announcements and receives device notifications, subject to push setup, device permissions, connectivity, and system delivery. GitHub schedules may be delayed or skipped, so publication times are not guaranteed. **Submit for Publication** also waits for the next scheduled run. See [GitHub scheduled event limitations](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
 - In public repositories, GitHub automatically disables scheduled workflows after 60 days without repository activity. Project administrators should regularly check Actions run history and re-enable disabled workflows from Actions. See [automatic schedule disabling conditions](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
 - Only draft and scheduled announcements can be edited. Published announcements can only be archived. Archiving updates only `status` and `updatedAt`.
 - The announcement list synchronizes the latest 200 records in real time, and its statistics cover those same 200 records. There is no demo or mock data.
@@ -90,4 +90,4 @@ Firestore schema:
 }
 ```
 
-New announcements use server timestamps for `createdAt` and `updatedAt`, with `publishedAt` set to `null`. Firestore Rules, scheduled publishing, and device push notification code are in `firebase/`, at the repository root in both the app repository and this standalone website repository. Deploy the Firestore Rules and configure trusted credentials for the scheduled workflow separately. Deploying the static website alone does not enable scheduled publishing. This setup does not use Cloud Functions.
+New announcements use server timestamps for `createdAt` and `updatedAt`, with `publishedAt` set to `null`. Firestore Rules, scheduled publishing, and server push delivery code are in this repository's `firebase/` directory. The mobile app's notification client lives in its separate app repository. Deploy the Firestore Rules and configure trusted credentials for the scheduled workflow separately. Deploying the static website alone does not enable scheduled publishing. This setup does not use Cloud Functions.
