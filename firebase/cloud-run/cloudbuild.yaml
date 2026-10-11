@@ -1,0 +1,7 @@
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-f', 'firebase/cloud-run/Dockerfile', '-t', 'us-central1-docker.pkg.dev/ck-app-database/ck-announcements/worker:${_WORKER_TAG}', '.']
+images:
+  - 'us-central1-docker.pkg.dev/ck-app-database/ck-announcements/worker:${_WORKER_TAG}'
+options:
+  logging: CLOUD_LOGGING_ONLY

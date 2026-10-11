@@ -2,6 +2,8 @@
 
 The app and admin website share Firestore in `ck-app-database`. A Node worker in `firebase/worker` publishes scheduled announcements and sends remote device notifications. Once configured, GitHub Actions checks for work approximately every five minutes, so this design does not require Cloud Functions, Cloud Scheduler, or a Firebase Blaze upgrade. Firestore and Authentication remain subject to Spark quotas. Standard GitHub-hosted runners are free for public repositories; private repositories have an Actions allowance. See [Firebase plans](https://firebase.google.com/docs/projects/billing/firebase-pricing-plans) and [GitHub Actions billing](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
 
+An optional [Cloud Scheduler and Cloud Run replacement](cloud-run/README.md) is prepared for deployments that need a dedicated scheduler. It builds the same worker source and requires an enabled billing account (Firebase Blaze). Preparing these files does not deploy the service or change the current GitHub schedule. Verify actual scheduled publication before switching schedulers.
+
 The independent admin repository is `CKApp-Dev/Notification`, hosted at https://notification.cksc.tw. Its root contains the website and this entire `firebase/` directory lives beneath it. Copy `github-actions/announcements.yml` to that repository's `.github/workflows/announcements.yml` and keep `main` as its default branch.
 
 ## Publication and delivery

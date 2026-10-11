@@ -3,7 +3,7 @@
   "private": true,
   "scripts": {
     "build": "npm --prefix worker run build",
-    "test": "node --test scripts/grant-admin.test.mjs && npm --prefix worker test",
+    "test": "node --test scripts/grant-admin.test.mjs cloud-run/*.test.cjs && npm --prefix worker test",
     "test:emulator": "npm run build && firebase emulators:exec --project demo-ck-announcements --only firestore 'npm --prefix worker run test:integration'",
     "grant-admin": "node scripts/grant-admin.mjs"
   },

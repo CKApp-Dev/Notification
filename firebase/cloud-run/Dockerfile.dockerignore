@@ -1,0 +1,13 @@
+# Dockerfile-specific allowlist for a repository-root build context.
+**
+!firebase/
+!firebase/worker/
+!firebase/worker/package.json
+!firebase/worker/package-lock.json
+!firebase/worker/tsconfig.json
+!firebase/worker/src/
+!firebase/worker/src/*.ts
+!firebase/cloud-run/
+!firebase/cloud-run/Dockerfile
+!firebase/cloud-run/adapter.cjs
+!firebase/cloud-run/server.cjs
