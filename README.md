@@ -1,6 +1,6 @@
 # CK APP 公告管理網站
 
-獨立的 React / TypeScript / Vite 專案，輸出為 `dist/`，部署至 [GitHub Pages](https://ChrisSun0731.github.io/CK-App-Admin/)。公告寫入與 App 共用的 `announcements` Firestore collection。它是獨立的網站專案，不會為 App 使用者新增登入流程。
+獨立的 React / TypeScript / Vite 專案，輸出為 `dist/`，部署至 [GitHub Pages](https://ChrisSun0731.github.io/CK-App-Admin/)。公告寫入與 App 共用的 `announcements` Firestore collection，擁有者可另在帳戶管理頁邀請公告管理員。它是獨立的網站專案，不會為 App 使用者新增登入流程。
 
 ## 開發與驗證
 
@@ -29,11 +29,37 @@ npm run dev
 
 1. 在 Firebase Console → Authentication → Sign-in method 啟用 Google，設定專案支援電子郵件。
 2. 在 Authentication → Settings → Authorized domains 加入 `chrissun0731.github.io`。若保留其他網站鏡像，也需各別加入其網域。本機開發另加入 `localhost` 與 `127.0.0.1`；新專案可能不會自動授權本機網域。
-3. 管理員先使用 Google 登入以建立 Firebase Auth 帳戶；未授權帳戶只會看到權限不足畫面。
-4. 專案擁有者從可信任的伺服器，使用 Firebase Admin SDK 為指定 UID 設定自訂宣告 `admin: true`。後端專案提供管理員授權腳本；不應以電郵網域或前端程式自行授權。
-5. 完成授權後，點選「重新確認權限」或重新登入。網站檢查 ID token 的 custom claim，實際讀寫權限仍由後端 Firestore Rules 保護。
+3. 首位擁有者先使用 Google 登入以建立 Firebase Auth 帳戶；尚未授權或邀請的帳戶只會看到權限不足畫面。
+4. 專案管理者從可信任的伺服器，使用 Firebase Admin SDK 為擁有者 UID 同時設定自訂宣告 `admin: true`、`accountManager: true`。後端專案提供授權腳本；網站無法自行授予這兩個角色，也不會根據電子郵件網域授權。
+5. 完成擁有者授權後，在權限不足畫面點選「重新確認權限」或重新登入；已登入的網站右上角也有重新確認權限按鈕。更新後，上方會出現「帳戶管理」頁籤。只有 `admin` 與 `accountManager` 兩個宣告都為布林值 `true` 才能管理邀請。
+6. 一般公告管理員由擁有者在「帳戶管理」輸入 Google 電子郵件邀請，不需要另行設定 custom claims。網站會監聽該已驗證 Google 帳戶自己的邀請資料；實際讀寫權限仍由後端 Firestore Rules 保護。
 
 一般登入使用 Google 彈出式視窗。若瀏覽器阻擋，畫面會引導允許視窗後重試。`VITE_FIREBASE_ENABLE_REDIRECT=true` 可開啟整頁登入備援按鈕，但 **啟用前必須先依 Firebase 的第三方儲存限制指南完成同源 auth helper、反向代理或對應 Firebase Hosting 設定**。一般 GitHub Pages 靜態網域不會自動提供 `/__/auth/*` helper，因此預設關閉整頁登入。詳見 [Google 登入文件](https://firebase.google.com/docs/auth/web/google-signin)、[redirect 設定指南](https://firebase.google.com/docs/auth/web/redirect-best-practices)及 [custom claims](https://firebase.google.com/docs/auth/admin/custom-claims)。
+
+## 帳戶管理與邀請
+
+- 擁有者可在「帳戶管理」新增邀請、篩選已啟用或已停用的邀請、編輯顯示名稱、停用或重新啟用權限，以及確認後移除邀請。
+- 邀請建立的是登入資格，不會寄送電子郵件，也不會預先建立 Firebase Authentication 使用者。請自行將網站連結提供給對方；受邀者首次以該 Google 帳戶登入時，才會建立登入帳戶。
+- 電子郵件會去除前後空格並轉為小寫，最多 254 個字元；不接受路徑、控制字元、內部空白或無效格式。Google 郵件的點號與 `+` 別名不會被合併，必須填入登入後實際顯示的電子郵件。
+- 顯示名稱可空白，最多 120 個字元，只用於邀請名單，不會變更對方的 Google 個人資料。
+- 一般受邀管理員只能管理公告，不能讀取其他邀請、邀請別人、修改自己的權限或設定密碼。
+- 對只透過邀請授權的管理員，停用或移除邀請會立即撤銷資料庫的管理權限；網站收到自己的邀請變更後會清除公告編輯與管理畫面。移除邀請不會刪除 Google 帳戶、Firebase Authentication 使用者或既有公告。
+- 目前擁有者以受保護卡片顯示，不列為一般受邀管理員，也不能邀請自己。擁有者原本的專案角色獨立於邀請名單，不會因停用或移除邀請而失去權限；變更擁有者角色須由可信任的 Firebase Admin 環境處理。
+
+邀請儲存在 `adminAccounts/{normalizedLowercaseEmail}`，文件 ID 與 `email` 相同：
+
+```ts
+{
+  email: string,
+  displayName: string,
+  enabled: boolean,
+  createdAt: Timestamp,
+  updatedAt: Timestamp,
+  createdBy: string // 邀請擁有者的 Firebase Auth UID
+}
+```
+
+新增邀請以伺服器時間設定 `createdAt` / `updatedAt`；更新僅改動顯示名稱或啟用狀態與 `updatedAt`，保留原始電子郵件、建立時間與建立者。
 
 ## 公告流程
 

@@ -1,8 +1,53 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function isAdmin() {
+    function hasAdminClaim() {
       return request.auth != null && request.auth.token.get('admin', false) == true;
+    }
+    function isAccountManager() {
+      return hasAdminClaim() && request.auth.token.get('accountManager', false) == true;
+    }
+    function isVerifiedGoogle() {
+      return request.auth != null
+        && request.auth.token.get('email_verified', false) == true
+        && request.auth.token.get('firebase', {}).get('sign_in_provider', '') == 'google.com'
+        && request.auth.token.get('email', '') is string
+        && request.auth.token.get('email', '').size() > 0;
+    }
+    function ownAccountPath() {
+      return /databases/$(database)/documents/adminAccounts/$(request.auth.token.email.lower());
+    }
+    function isInvitedAdmin() {
+      return isVerifiedGoogle() && exists(ownAccountPath())
+        && get(ownAccountPath()).data.enabled == true;
+    }
+    function isAdmin() {
+      return hasAdminClaim() || isInvitedAdmin();
+    }
+    match /adminAccounts/{email} {
+      function validAccount(data) {
+        return data.keys().hasAll(['email', 'displayName', 'enabled', 'createdAt', 'updatedAt', 'createdBy'])
+          && data.keys().hasOnly(['email', 'displayName', 'enabled', 'createdAt', 'updatedAt', 'createdBy'])
+          && email.size() > 0 && email == email.lower()
+          && data.email == email
+          && data.displayName is string && data.displayName.size() <= 120
+          && data.enabled is bool
+          && data.createdAt is timestamp && data.updatedAt is timestamp
+          && data.createdBy is string;
+      }
+      allow get: if isAccountManager()
+        || (isVerifiedGoogle() && email == request.auth.token.email.lower());
+      allow list: if isAccountManager();
+      allow create: if isAccountManager() && validAccount(request.resource.data)
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if isAccountManager() && validAccount(request.resource.data)
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if isAccountManager();
     }
     function validAnnouncement(data) {
       return data.keys().hasAll(['title', 'body', 'url', 'status', 'publishAt', 'publishedAt', 'createdAt', 'updatedAt', 'createdBy'])

@@ -6,7 +6,15 @@ The independent admin repository is `ChrisSun0731/CK-App-Admin`: its root contai
 
 ## Publication and delivery
 
-Administrators sign in with Google and an `admin: true` Firebase Auth custom claim. They create drafts/schedules in `announcements/{id}` with `title`, `body`, `url`, `status`, `publishAt`, `publishedAt`, `createdAt`, `updatedAt`, and `createdBy`. Dates are Firestore timestamps; empty links or HTTPS links are allowed. Public reads require `status == published`, ordered by `publishAt` descending, limited to 50 by the app. Drafts/schedules stay private even after their publication date passes. Admins can edit pending rows or archive published rows, without rewriting or republishing history.
+Administrators sign in with Google. A verified Google account receives announcement access through an enabled email invitation in `adminAccounts`; existing `admin: true` Firebase Auth custom claims also grant access. They create drafts/schedules in `announcements/{id}` with `title`, `body`, `url`, `status`, `publishAt`, `publishedAt`, `createdAt`, `updatedAt`, and `createdBy`. Dates are Firestore timestamps; empty links or HTTPS links are allowed. Public reads require `status == published`, ordered by `publishAt` descending, limited to 50 by the app. Drafts/schedules stay private even after their publication date passes. Admins can edit pending rows or archive published rows, without rewriting or republishing history.
+
+## Administrator accounts
+
+The website's owner invites Google accounts by email before they sign in. Invitations live at `adminAccounts/{normalizedLowercaseEmail}` and contain exactly `email` (matching the document ID), `displayName` (up to 120 characters, empty allowed), `enabled` (boolean), `createdAt`, `updatedAt` (Firestore timestamps), and `createdBy` (the creating owner's UID). Creation uses server timestamps for both dates and the current owner's UID. Updates preserve `email`, `createdAt`, and `createdBy`, and set `updatedAt` with a server timestamp. Owners may delete invitations.
+
+Only an account with both server-issued custom claims `admin: true` and `accountManager: true` can list or manage invitations. An invitation cannot confer account-management privileges. Verified Google users can get their own normalized-email invitation, including a disabled or missing row, but cannot list invitations or read other accounts. Their Google sign-in token must have `email_verified: true` and provider `google.com`.
+
+Enabling an invitation grants announcement access without a token refresh; disabling or deleting it revokes access on subsequent Firestore server requests using the same signed-in account. Already downloaded data cannot be recalled. The website listens to the user's own invitation to update its interface. Existing server-issued `admin: true` claims remain independent of invitations, so disabling an invitation does not revoke a claim holder. An authorized Firebase Auth operator must remove those claims separately. The owner's server-issued claims keep account management accessible even if their own invitation is disabled or deleted.
 
 Each worker pass sequentially:
 
@@ -37,7 +45,7 @@ npm test
 npm run test:emulator
 ```
 
-The emulator always uses `demo-ck-announcements`, never production. Tests cover due dates, concurrent workers, draft privacy, history immutability, own-device access, retry checkpoints, receipt cleanup, archives during delivery, and more than 500 devices resuming across runs. They use a fake Expo gateway and send no real notifications. The test SDK's older gRPC dependency is overridden with compatible `@grpc/grpc-js` 1.14.6+ to address advisories.
+The emulator always uses `demo-ck-announcements`, never production. Tests cover due dates, concurrent workers, draft privacy, history immutability, invitation access and revocation, prevention of account privilege escalation, own-device access, retry checkpoints, receipt cleanup, archives during delivery, and more than 500 devices resuming across runs. They use a fake Expo gateway and send no real notifications. The test SDK's older gRPC dependency is overridden with compatible `@grpc/grpc-js` 1.14.6+ to address advisories.
 
 ## Deploy Firestore and configure mobile
 
@@ -113,18 +121,20 @@ gcloud auth application-default login
 GOOGLE_CLOUD_PROJECT=ck-app-database npm --prefix firebase/worker run start
 ```
 
-## Grant an administrator privately
+## Android push credentials
 
 Android FCM credentials are separate from the scheduled worker identity. The optional `scripts/configure-android-push.mjs` helper prints its plan by default and requires explicit key-creation/upload approval before apply mode. It creates a dedicated messaging-only identity, keeps its private key in memory, and uploads it only to the verified `@ckappofficial/ck-app` Expo account. It refuses unrelated existing credentials and never revokes keys automatically. iOS APNs credentials and Apple provisioning must be configured separately; see the mobile repository's announcement setup guide.
 
-Have the intended administrator sign into the website once with Google. An authorized operator with Firebase Auth administration access then runs:
+## Bootstrap an account manager privately
+
+Ordinary administrators should use email invitations in the website. To bootstrap or recover an owner, have the intended owner sign into the website once with Google. An authorized operator with Firebase Auth administration access then runs:
 
 ```sh
 cd firebase
 gcloud auth application-default login
-npm run grant-admin -- --project ck-app-database --email administrator@example.com
+npm run grant-admin -- --project ck-app-database --email owner@example.com --account-manager
 ```
 
-The script rejects disabled, unverified, or non-Google accounts and merges existing custom claims. This explicit email grant is the allow-list; ordinary Google sign-in never grants admin access. Sign out and sign in again to refresh the ID token. Firebase CLI login alone does not configure Admin SDK credentials. The scheduled worker's service account cannot perform this grant.
+The script rejects disabled, unverified, or non-Google accounts and merges existing custom claims. `--account-manager` grants both `admin: true` and `accountManager: true`; omitting it grants durable announcement-admin access only. Ordinary Google sign-in never grants access without an enabled invitation or a server-issued claim. Sign out and sign in again after a custom-claim change to refresh the ID token. Firebase CLI login alone does not configure Admin SDK credentials. The scheduled worker's service account cannot perform this grant.
 
 Inspect Actions logs and `notificationJobs` / `notificationReceipts` in the Firebase console for operational failures. After fixing a failed job's cause, an authorized operator may reset `status: pending`, `errorAttempts: 0`, `nextAttemptAt` to the current server timestamp, and pending recipients' attempts to zero. Preserve accepted recipients and token deduplication records to avoid replaying successful delivery.

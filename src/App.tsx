@@ -2,27 +2,10 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { GoogleAuthProvider, getRedirectResult, onIdTokenChanged, signInWithPopup, signInWithRedirect, signOut, type User } from 'firebase/auth';
 import { addDoc, collection, doc, limit, onSnapshot, orderBy, query, runTransaction, serverTimestamp, Timestamp, type DocumentData } from 'firebase/firestore';
 import { auth, db, friendlyError, missingConfig, redirectEnabled } from './firebase';
+import { Brand, Icon } from './ui';
+import { deriveAccess } from './accounts-domain';
+import AccountManagement from './AccountManagement';
 import { editorFor, emptyEditor, formatDate, STATUS_LABELS, validateEditor, type Announcement, type AnnouncementStatus, type EditorValues, type SaveAction } from './domain';
-
-function Icon({ name, size = 20 }: { name: 'bell' | 'plus' | 'clock' | 'check' | 'arrow' | 'logout' | 'file' | 'archive' | 'shield' | 'refresh'; size?: number }) {
-  const paths: Record<typeof name, ReactNode> = {
-    bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" /><path d="M10 21h4" /></>,
-    plus: <path d="M12 5v14M5 12h14" />,
-    clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
-    check: <path d="m5 12 4 4L19 6" />,
-    arrow: <path d="M5 12h14m-5-5 5 5-5 5" />,
-    logout: <><path d="M9 5H4v14h5m5-14 7 7-7 7M8 12h13" /></>,
-    file: <><path d="M14 3H5v18h14V8zM14 3v5h5M8 12h8M8 16h6" /></>,
-    archive: <><path d="M4 8h16v12H4zM3 3h18v5H3zM9 12h6" /></>,
-    shield: <><path d="M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6z" /><path d="m8 12 3 3 5-6" /></>,
-    refresh: <><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6 6a8 8 0 0 1 13 3M5 15a8 8 0 0 0 13 3" /></>,
-  };
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
-}
-
-function Brand() {
-  return <div className="brand"><span className="brand-mark" aria-hidden="true">CK<span>+</span></span><span className="brand-copy">CK APP<span>ADMIN CONSOLE</span></span></div>;
-}
 
 function Gate({ children }: { children: ReactNode }) {
   return <div className="gate-page"><header className="gate-header"><Brand /><span className="header-label">公告管理平台</span></header><main className="gate-wrap"><div className="gate-intro"><p className="eyebrow">CONNECTED CAMPUS</p><h1>讓重要消息，<br />傳遞到位。</h1><p>從一則校園消息到每個人的手機，<br />在這裡建立、排程與管理 CK APP 公告。</p><div className="gate-points"><span><Icon name="file" />編輯公告</span><span><Icon name="clock" />預約發布</span><span><Icon name="bell" />手機通知</span></div><span className="gate-grid" aria-hidden="true" /></div><section className="gate-card">{children}</section></main><footer className="gate-footer">CK APP · 你的校園助理<span>僅供授權管理員使用</span></footer></div>;
@@ -32,29 +15,72 @@ function SetupRequired() {
   return <Gate><div className="gate-icon"><Icon name="shield" size={25} /></div><p className="eyebrow">SETUP REQUIRED</p><h2>完成專案連線</h2><p className="muted">這個管理平台尚未連接 Firebase。請由專案管理者填入網站的 Firebase 設定，再重新部署。</p><div className="setup-detail"><strong>需要的公開設定</strong><code>{missingConfig.join(' · ')}</code></div><p className="small muted">設定方式請參閱網站專案的 README.md。完成連線後，即可使用管理員 Google 帳戶登入。</p></Gate>;
 }
 
-type Session = { status: 'loading' | 'signed-out' | 'admin' | 'denied' | 'error'; user: User | null };
+type Session = { status: 'loading' | 'signed-out' | 'admin' | 'denied' | 'error'; user: User | null; canManageAccounts: boolean };
 
 function AuthenticatedApp() {
-  const [session, setSession] = useState<Session>({ status: 'loading', user: null });
+  const [session, setSession] = useState<Session>({ status: 'loading', user: null, canManageAccounts: false });
   const [authError, setAuthError] = useState('');
   const [signingIn, setSigningIn] = useState(false);
   const [popupBlocked, setPopupBlocked] = useState(false);
+  const [authRetry, setAuthRetry] = useState(0);
+  const [page, setPage] = useState<'announcements' | 'accounts'>('announcements');
+  const observedUid = useRef<string | null>(null);
   useEffect(() => {
     let active = true;
     let revision = 0;
+    let unsubscribeInvitation = () => {};
     getRedirectResult(auth!).catch(error => { if (active) setAuthError(friendlyError(error)); });
     const unsubscribe = onIdTokenChanged(auth!, async user => {
       const current = ++revision;
-      if (!user) { setSession({ status: 'signed-out', user: null }); return; }
+      unsubscribeInvitation(); unsubscribeInvitation = () => {};
+      if (!user) { observedUid.current = null; setSession({ status: 'signed-out', user: null, canManageAccounts: false }); return; }
+      if (observedUid.current !== user.uid) setSession({ status: 'loading', user, canManageAccounts: false });
+      observedUid.current = user.uid;
       try {
         const result = await user.getIdTokenResult();
-        if (active && current === revision) setSession({ status: result.claims.admin === true ? 'admin' : 'denied', user });
+        if (!active || current !== revision) return;
+        const identity = {
+          adminClaim: result.claims.admin,
+          accountManagerClaim: result.claims.accountManager,
+          email: typeof result.claims.email === 'string' ? result.claims.email : user.email,
+          emailVerified: result.claims.email_verified === true,
+          signInProvider: result.signInProvider,
+        };
+        const access = deriveAccess({ ...identity, invitation: null });
+        if (access.isAdmin || !access.invitationEmail) {
+          setSession({ status: access.isAdmin ? 'admin' : 'denied', user, canManageAccounts: access.canManageAccounts });
+          setAuthError('');
+          return;
+        }
+        setSession(previous => previous.status === 'admin' && previous.user?.uid === user.uid
+          ? { ...previous, user, canManageAccounts: false }
+          : { status: 'loading', user, canManageAccounts: false });
+        let serverConfirmed = false;
+        unsubscribeInvitation = onSnapshot(doc(db!, 'adminAccounts', access.invitationEmail), { includeMetadataChanges: true }, snapshot => {
+          if (!active || current !== revision) return;
+          // A cached invitation cannot establish access after a new sign-in.
+          if (!serverConfirmed && snapshot.metadata.fromCache) return;
+          serverConfirmed = true;
+          const data = snapshot.data();
+          const invitation = data && typeof data.email === 'string' && typeof data.enabled === 'boolean'
+            ? { email: data.email, enabled: data.enabled } : null;
+          const liveAccess = deriveAccess({ ...identity, invitation });
+          setAuthError('');
+          setSession({ status: liveAccess.isAdmin ? 'admin' : 'denied', user, canManageAccounts: liveAccess.canManageAccounts });
+        }, error => {
+          if (!active || current !== revision) return;
+          setAuthError(friendlyError(error));
+          setSession({ status: 'error', user, canManageAccounts: false });
+        });
       } catch (error) {
-        if (active && current === revision) { setAuthError(friendlyError(error)); setSession({ status: 'error', user }); }
+        if (active && current === revision) { setAuthError(friendlyError(error)); setSession({ status: 'error', user, canManageAccounts: false }); }
       }
-    }, error => { if (active) { setAuthError(friendlyError(error)); setSession({ status: 'error', user: auth!.currentUser }); } });
-    return () => { active = false; unsubscribe(); };
-  }, []);
+    }, error => { if (active) { unsubscribeInvitation(); setAuthError(friendlyError(error)); setSession({ status: 'error', user: auth!.currentUser, canManageAccounts: false }); } });
+    return () => { active = false; unsubscribe(); unsubscribeInvitation(); };
+  }, [authRetry]);
+  useEffect(() => {
+    if (!session.canManageAccounts || session.status !== 'admin') setPage('announcements');
+  }, [session.canManageAccounts, session.status]);
 
   async function login(redirect = false) {
     setSigningIn(true); setAuthError(''); setPopupBlocked(false);
@@ -73,10 +99,10 @@ function AuthenticatedApp() {
   }
   async function refresh() {
     setAuthError(''); setSigningIn(true);
-    try { await session.user?.getIdToken(true); } catch (error) { setAuthError(friendlyError(error)); }
+    try { await session.user?.getIdToken(true); setAuthRetry(previous => previous + 1); } catch (error) { setAuthError(friendlyError(error)); }
     finally { setSigningIn(false); }
   }
-  if (session.status === 'admin' && session.user) return <Dashboard user={session.user} logout={logout} authError={authError} />;
+  if (session.status === 'admin' && session.user) return <div className="dashboard"><header className="app-header"><Brand /><div className="header-divider" /><nav className="admin-navigation" aria-label="管理導覽"><button className={page === 'announcements' ? 'navigation-tab active' : 'navigation-tab'} aria-current={page === 'announcements' ? 'page' : undefined} onClick={() => setPage('announcements')}>公告中心</button>{session.canManageAccounts && <button className={page === 'accounts' ? 'navigation-tab active' : 'navigation-tab'} aria-current={page === 'accounts' ? 'page' : undefined} onClick={() => setPage('accounts')}>帳戶管理</button>}</nav><div className="user-area"><span className="admin-tag"><Icon name="shield" size={14} />{session.canManageAccounts ? '擁有者' : '管理員'}</span><span className="user-email" title={session.user.email ?? ''}>{session.user.email}</span><button className="icon-button" onClick={() => void refresh()} aria-label="重新確認權限" disabled={signingIn}><Icon name="refresh" size={17} /></button><button className="icon-button" onClick={() => void logout()} aria-label="登出"><Icon name="logout" /></button></div></header><div hidden={page !== 'announcements'}><Dashboard user={session.user} authError={authError} /></div>{session.canManageAccounts && <div hidden={page !== 'accounts'}><AccountManagement user={session.user} /></div>}</div>;
   return <Gate><div className="gate-icon"><Icon name="shield" size={25} /></div><p className="eyebrow">ADMIN ACCESS</p><h2>{session.status === 'denied' ? '此帳戶尚未獲得授權' : session.status === 'loading' ? '正在確認登入狀態' : session.status === 'error' ? '無法確認管理員權限' : '歡迎回來'}</h2>
     {session.status === 'loading' ? <p className="muted" role="status">正在安全連線，請稍候…</p> : session.status === 'signed-out' ? <><p className="muted">使用已授權的 Google 帳戶登入，<br />開始管理 App 的最新消息。</p><button className="button primary login-button" onClick={() => void login()} disabled={signingIn}><span className="google-icon" aria-hidden="true">G</span>{signingIn ? '正在登入…' : '使用 Google 帳戶登入'}<Icon name="arrow" /></button>{popupBlocked && redirectEnabled && <button className="button secondary full" onClick={() => void login(true)} disabled={signingIn}>改用整頁登入</button>}<p className="small muted gate-note">登入後仍需具備專案管理者授予的管理員權限。</p></> : <><p className="muted">{session.user?.email && <strong className="account-email">{session.user.email}<br /></strong>}請聯絡專案管理者確認此帳戶的管理員權限。授權完成後可重新確認。</p><button className="button primary full" onClick={() => void refresh()} disabled={signingIn}><Icon name="refresh" />重新確認權限</button><button className="button secondary full" onClick={() => void logout()}><Icon name="logout" />登出並切換帳戶</button></>}
     {authError && <p role="alert" className="notice error">{authError}</p>}
@@ -92,7 +118,7 @@ function decodeAnnouncement(id: string, data: DocumentData): Announcement | null
 
 const filters: ('all' | AnnouncementStatus)[] = ['all', 'scheduled', 'draft', 'published', 'archived'];
 
-function Dashboard({ user, logout, authError }: { user: User; logout: () => Promise<void>; authError: string }) {
+function Dashboard({ user, authError }: { user: User; authError: string }) {
   const [rows, setRows] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState('');
@@ -192,7 +218,7 @@ function Dashboard({ user, logout, authError }: { user: User; logout: () => Prom
     finally { setSaving(false); }
   }
 
-  return <div className="dashboard"><header className="app-header"><Brand /><div className="header-divider" /><span className="header-section">公告中心</span><div className="user-area"><span className="admin-tag"><Icon name="shield" size={14} />管理員</span><span className="user-email" title={user.email ?? ''}>{user.email}</span><button className="icon-button" onClick={() => void logout()} aria-label="登出"><Icon name="logout" /></button></div></header>
+  return <>
     <main className="workspace"><div className="page-heading"><div><p className="eyebrow">ANNOUNCEMENTS</p><h1>每個重要消息，都在這裡。</h1><p className="muted">管理 App 首頁公告，輕鬆安排校園消息的發布時間。</p></div><button className="button primary" onClick={() => openAnnouncement(null)} disabled={saving}><Icon name="plus" />建立公告</button></div>
       <div className="stats"><Stat icon="bell" label="已發布" value={rows.filter(row => row.status === 'published').length} detail="正在 App 中顯示" /><Stat icon="clock" label="已排程" value={rows.filter(row => row.status === 'scheduled').length} detail="等待自動發布" /><Stat icon="file" label="草稿" value={rows.filter(row => row.status === 'draft').length} detail="持續醞釀的消息" /></div>
       <div className="schedule-note"><span className="note-icon"><Icon name="clock" size={17} /></span><p>先安排，再安心分享。<span>時間均為台北時間（UTC+8）；公告約每 5 分鐘處理一次，排程可能延遲。發布後送出裝置通知。</span></p></div>
@@ -213,7 +239,7 @@ function Dashboard({ user, logout, authError }: { user: User; logout: () => Prom
         <div className="preview-section"><div className="preview-heading"><h3>App 顯示預覽</h3><span>{dirty && !editable ? '尚未儲存的內容' : '內容樣式參考'}</span></div><div className="phone-preview"><div className="preview-app-title"><span className="preview-small-mark">CK</span><span>最新消息</span><span className="preview-sample">預覽</span></div><article className="preview-card"><p className="preview-date"><Icon name="bell" size={14} />{values.publishTime ? formatDate(validateEditor(values, 'draft').data.publishAt) : '發布日期'}</p><h4>{values.title.trim() || '你的公告標題'}</h4><p className={!values.body.trim() ? 'placeholder' : ''}>{values.body.trim() || '公告內容將顯示在這裡。讓重要資訊清楚、簡單地被看見。'}</p>{values.url.trim() && <span className="preview-link">查看詳細資訊 <Icon name="arrow" size={15} /></span>}</article></div></div>
       </section></div>
     </main><footer className="workspace-footer">CK APP · 公告管理平台<span>為校園生活，多想一步。</span></footer>
-  </div>;
+  </>;
 }
 
 function StatusBadge({ status }: { status: AnnouncementStatus }) { return <span className={`status-badge ${status}`}><span />{STATUS_LABELS[status]}</span>; }
