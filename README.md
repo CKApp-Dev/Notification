@@ -1,8 +1,8 @@
-# CK APP 公告管理網站
+# CK APP Announcement Admin
 
-獨立的 React / TypeScript / Vite 專案，輸出為 `dist/`，部署至 [GitHub Pages](https://ChrisSun0731.github.io/CK-App-Admin/)。公告寫入與 App 共用的 `announcements` Firestore collection，擁有者可另在帳戶管理頁邀請公告管理員。它是獨立的網站專案，不會為 App 使用者新增登入流程。
+A standalone React, TypeScript, and Vite website that builds to `dist/` and deploys to [GitHub Pages](https://ChrisSun0731.github.io/CK-App-Admin/). Announcements are stored in the `announcements` Firestore collection shared with the app. Owners can invite announcement administrators from the Account Management page. This website is a separate project and does not add a sign-in flow for app users.
 
-## 開發與驗證
+## Development and Validation
 
 ```sh
 npm ci
@@ -11,42 +11,42 @@ npm run build
 npm run dev
 ```
 
-在獨立的 `ChrisSun0731/CK-App-Admin` 倉庫根目錄執行以上指令；若使用 App 倉庫的來源，先進入 `admin/`。
+Run these commands from the root of the standalone `ChrisSun0731/CK-App-Admin` repository. If you are working from the app repository, enter `admin/` first.
 
-網站預設使用使用者提供的 `src/firebase-config.json` 公開 Firebase Web 設定（`ck-app-database`）；不使用 Analytics。切換專案時，修改該公開設定，或複製 `.env.example` 為 `.env.local` 並設定 `VITE_FIREBASE_*` 覆寫值。環境變數在建置時寫入，改動後須重新建置部署。這些是公開瀏覽器設定；服務帳戶私鑰不得放入網站。
+By default, the website uses the public Firebase web configuration in `src/firebase-config.json` for the `ck-app-database` project. Analytics is not used. To switch Firebase projects, update that configuration or copy `.env.example` to `.env.local` and set the `VITE_FIREBASE_*` overrides. Environment variables are embedded at build time, so changes require rebuilding and redeploying the website. These settings are public browser configuration; never include service account private keys in the website.
 
-## GitHub Pages 部署
+## GitHub Pages Deployment
 
-1. 將本網站目錄的來源置於 `ChrisSun0731/CK-App-Admin` 倉庫根目錄（`package.json`、`src/`、`index.html` 與 `.github/workflows/pages.yml` 均在根目錄）；不包含 `node_modules/`、`dist/`、本機環境檔或 `.openai/`。
-2. 在 GitHub 倉庫 Settings → Pages → Build and deployment 選擇 **GitHub Actions**。
-3. 推送至 `main`，或手動執行 **Deploy admin website to GitHub Pages** 工作流程。它會安裝依賴、執行測試、建置、上傳 `dist/` 並部署至 `github-pages` environment。
-4. 工作流程以 `actions/configure-pages` 的 `base_path` 設定 Vite 的 `ADMIN_BASE_PATH`，支援 `/CK-App-Admin/` 子路徑與自訂網域。手動建置可執行 `ADMIN_BASE_PATH=/CK-App-Admin/ npm run build`；本機預設 `/`。
-5. 確認 Firebase Authorized domains 包含 `chrissun0731.github.io`；授權的是主機名稱，不包含路徑。
+1. Place the website source at the root of `ChrisSun0731/CK-App-Admin`, with `package.json`, `src/`, `index.html`, and `.github/workflows/pages.yml` at their expected paths. Exclude `node_modules/`, `dist/`, local environment files, and `.openai/`.
+2. In the GitHub repository, go to Settings → Pages → Build and deployment and select **GitHub Actions**.
+3. Push to `main` or manually run the **Deploy admin website to GitHub Pages** workflow. It installs dependencies, runs tests, builds the website, uploads `dist/`, and deploys to the `github-pages` environment.
+4. The workflow sets Vite's `ADMIN_BASE_PATH` using the `base_path` output from `actions/configure-pages`, supporting both the `/CK-App-Admin/` subpath and custom domains. For a manual build, run `ADMIN_BASE_PATH=/CK-App-Admin/ npm run build`. The local default is `/`.
+5. Ensure Firebase's Authorized domains list includes `chrissun0731.github.io`. Enter the hostname only, without a path.
 
-工作流程使用官方 `checkout@v7`、`setup-node@v7`、`configure-pages@v5`、`upload-pages-artifact@v4`、`deploy-pages@v4`。參考 [GitHub Pages 自訂工作流程](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)、[checkout](https://github.com/actions/checkout/releases) 與 [setup-node](https://github.com/actions/setup-node/releases)。網站建置與部署不需要 Firebase 服務帳戶；排程發布程式的憑證另行設定，不能放入公開設定或網站產物。
+The workflow uses the official `checkout@v7`, `setup-node@v7`, `configure-pages@v5`, `upload-pages-artifact@v4`, and `deploy-pages@v4` actions. See [custom GitHub Pages workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages), [checkout releases](https://github.com/actions/checkout/releases), and [setup-node releases](https://github.com/actions/setup-node/releases). Building and deploying the website does not require a Firebase service account. Configure credentials for the scheduled publisher separately; never include them in public configuration or website build artifacts.
 
-## 登入與管理員權限
+## Sign-In and Administrator Permissions
 
-1. 在 Firebase Console → Authentication → Sign-in method 啟用 Google，設定專案支援電子郵件。
-2. 在 Authentication → Settings → Authorized domains 加入 `chrissun0731.github.io`。若保留其他網站鏡像，也需各別加入其網域。本機開發另加入 `localhost` 與 `127.0.0.1`；新專案可能不會自動授權本機網域。
-3. 首位擁有者先使用 Google 登入以建立 Firebase Auth 帳戶；尚未授權或邀請的帳戶只會看到權限不足畫面。
-4. 專案管理者從可信任的伺服器，使用 Firebase Admin SDK 為擁有者 UID 同時設定自訂宣告 `admin: true`、`accountManager: true`。後端專案提供授權腳本；網站無法自行授予這兩個角色，也不會根據電子郵件網域授權。
-5. 完成擁有者授權後，在權限不足畫面點選「重新確認權限」或重新登入；已登入的網站右上角也有重新確認權限按鈕。更新後，上方會出現「帳戶管理」頁籤。只有 `admin` 與 `accountManager` 兩個宣告都為布林值 `true` 才能管理邀請。
-6. 一般公告管理員由擁有者在「帳戶管理」輸入 Google 電子郵件邀請，不需要另行設定 custom claims。網站會監聽該已驗證 Google 帳戶自己的邀請資料；實際讀寫權限仍由後端 Firestore Rules 保護。
+1. In Firebase Console → Authentication → Sign-in method, enable Google and set the project's support email address.
+2. Under Authentication → Settings → Authorized domains, add `chrissun0731.github.io`. Add the domains of any additional website mirrors as well. For local development, also add `localhost` and `127.0.0.1`; new projects may not authorize local domains automatically.
+3. The first owner must sign in with Google to create a Firebase Authentication account. Accounts without authorization or an invitation will see an insufficient permissions screen.
+4. A project administrator must use the Firebase Admin SDK from a trusted server to set both custom claims, `admin: true` and `accountManager: true`, for the owner's UID. The backend project provides an authorization script. The website cannot grant these roles itself and does not authorize users based on their email domain.
+5. After granting the owner role, click **Recheck Permissions** on the insufficient permissions screen or sign in again. A permissions refresh button is also available at the top right when signed in. Once permissions refresh, the **Account Management** tab appears. Both `admin` and `accountManager` must be the boolean value `true` to manage invitations.
+6. Owners invite regular announcement administrators by entering their Google email address in **Account Management**. No additional custom claims are required. The website listens for changes to the verified Google account's own invitation record; backend Firestore Rules enforce the actual read and write permissions.
 
-一般登入使用 Google 彈出式視窗。若瀏覽器阻擋，畫面會引導允許視窗後重試。`VITE_FIREBASE_ENABLE_REDIRECT=true` 可開啟整頁登入備援按鈕，但 **啟用前必須先依 Firebase 的第三方儲存限制指南完成同源 auth helper、反向代理或對應 Firebase Hosting 設定**。一般 GitHub Pages 靜態網域不會自動提供 `/__/auth/*` helper，因此預設關閉整頁登入。詳見 [Google 登入文件](https://firebase.google.com/docs/auth/web/google-signin)、[redirect 設定指南](https://firebase.google.com/docs/auth/web/redirect-best-practices)及 [custom claims](https://firebase.google.com/docs/auth/admin/custom-claims)。
+Google sign-in uses a popup by default. If the browser blocks it, the website prompts the user to allow popups and try again. Setting `VITE_FIREBASE_ENABLE_REDIRECT=true` enables a full-page sign-in fallback button, but **first configure a same-origin auth helper, reverse proxy, or appropriate Firebase Hosting setup according to Firebase's third-party storage restrictions guide**. A standard GitHub Pages static domain does not automatically provide the `/__/auth/*` helper, so redirect sign-in is disabled by default. See the documentation for [Google sign-in](https://firebase.google.com/docs/auth/web/google-signin), [redirect configuration](https://firebase.google.com/docs/auth/web/redirect-best-practices), and [custom claims](https://firebase.google.com/docs/auth/admin/custom-claims).
 
-## 帳戶管理與邀請
+## Account Management and Invitations
 
-- 擁有者可在「帳戶管理」新增邀請、篩選已啟用或已停用的邀請、編輯顯示名稱、停用或重新啟用權限，以及確認後移除邀請。
-- 邀請建立的是登入資格，不會寄送電子郵件，也不會預先建立 Firebase Authentication 使用者。請自行將網站連結提供給對方；受邀者首次以該 Google 帳戶登入時，才會建立登入帳戶。
-- 電子郵件會去除前後空格並轉為小寫，最多 254 個字元；不接受路徑、控制字元、內部空白或無效格式。Google 郵件的點號與 `+` 別名不會被合併，必須填入登入後實際顯示的電子郵件。
-- 顯示名稱可空白，最多 120 個字元，只用於邀請名單，不會變更對方的 Google 個人資料。
-- 一般受邀管理員只能管理公告，不能讀取其他邀請、邀請別人、修改自己的權限或設定密碼。
-- 對只透過邀請授權的管理員，停用或移除邀請會立即撤銷資料庫的管理權限；網站收到自己的邀請變更後會清除公告編輯與管理畫面。移除邀請不會刪除 Google 帳戶、Firebase Authentication 使用者或既有公告。
-- 目前擁有者以受保護卡片顯示，不列為一般受邀管理員，也不能邀請自己。擁有者原本的專案角色獨立於邀請名單，不會因停用或移除邀請而失去權限；變更擁有者角色須由可信任的 Firebase Admin 環境處理。
+- In **Account Management**, owners can create invitations, filter enabled or disabled invitations, edit display names, disable or restore access, and remove invitations after confirmation.
+- An invitation grants eligibility to sign in. It does not send an email or create a Firebase Authentication user in advance. Share the website link with the invitee directly; their authentication account is created when they first sign in with that Google account.
+- Email addresses are trimmed and converted to lowercase, with a maximum length of 254 characters. Paths, control characters, internal whitespace, and invalid formats are rejected. Dots and `+` aliases in Google email addresses are not merged, so enter the exact email address shown after sign-in.
+- Display names are optional and limited to 120 characters. They appear only in the invitation list and do not change the invitee's Google profile.
+- Regular invited administrators can manage announcements only. They cannot read other invitations, invite users, change their own permissions, or set passwords.
+- For administrators authorized solely through an invitation, disabling or removing that invitation immediately revokes database administration access. When the website receives the change to the user's own invitation, it clears the announcement editor and administration views. Removing an invitation does not delete the Google account, Firebase Authentication user, or existing announcements.
+- The current owner appears in a protected card, is not listed as a regular invited administrator, and cannot invite themselves. The owner's existing project roles are independent of the invitation list, so disabling or removing an invitation does not revoke those roles. Owner role changes must be handled in a trusted Firebase Admin environment.
 
-邀請儲存在 `adminAccounts/{normalizedLowercaseEmail}`，文件 ID 與 `email` 相同：
+Invitations are stored at `adminAccounts/{normalizedLowercaseEmail}`, with the document ID matching `email`:
 
 ```ts
 {
@@ -55,26 +55,26 @@ npm run dev
   enabled: boolean,
   createdAt: Timestamp,
   updatedAt: Timestamp,
-  createdBy: string // 邀請擁有者的 Firebase Auth UID
+  createdBy: string // Firebase Auth UID of the owner who created the invitation
 }
 ```
 
-新增邀請以伺服器時間設定 `createdAt` / `updatedAt`；更新僅改動顯示名稱或啟用狀態與 `updatedAt`，保留原始電子郵件、建立時間與建立者。
+New invitations use server timestamps for `createdAt` and `updatedAt`. Updates change only the display name or enabled status, along with `updatedAt`, preserving the original email address, creation time, and creator.
 
-## 公告流程
+## Announcement Workflow
 
-- 標題最多 120 個字元，純文字內容最多 10,000 個字元，延伸連結可空白或使用 HTTPS，最多 2,048 個字元。
-- 日期時間輸入一律以 `Asia/Taipei`（UTC+8）解讀，與管理員瀏覽器的時區無關。
-- 「儲存草稿」建立或更新 `draft`，不會自動發布。
-- 「排程發布」儲存 `scheduled` 與未來的 `publishAt`。
-- 「立即發布」也儲存 `scheduled`，`publishAt` 設為現在；網站不直接設定 `published`，由可信任的排程後端發布與推播。
-- 後端以 GitHub Actions 排程約每 5 分鐘檢查到期公告並設定 `published` / `publishedAt`，App 會取得已發布公告並收到裝置通知（取決於裝置授權、連線與系統投遞情況）。GitHub 排程可能延遲或略過，無法保證精確發布時間；「立即發布」也會等待下一輪排程。詳見 [GitHub 排程事件限制](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)。
-- 公開倉庫若連續 60 天沒有倉庫活動，GitHub 會自動停用排程工作流程；專案管理者須定期確認 Actions 執行紀錄，停用時從 Actions 重新啟用。詳見 [排程自動停用條件](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)。
-- 只有草稿及排程公告可編輯；已發布公告只能封存。封存時僅更新 `status` 與 `updatedAt`。
-- 公告列表即時同步最近 200 則資料；數字統計也以這 200 則為範圍。沒有示範或假資料。
-- 同時編輯時，儲存前會檢查 `updatedAt`，避免覆寫其他管理員已完成的變更。
+- Titles are limited to 120 characters, plain-text content to 10,000 characters, and optional links to 2,048 characters. Links must use HTTPS.
+- All date and time inputs are interpreted in `Asia/Taipei` (UTC+8), regardless of the administrator's browser time zone.
+- **Save Draft** creates or updates a `draft` without publishing it automatically.
+- **Schedule Publication** saves the announcement as `scheduled` with a future `publishAt`.
+- **Publish Now** also saves the announcement as `scheduled`, with `publishAt` set to the current time. The website does not set `published` directly; a trusted scheduled backend handles publication and push notifications.
+- The backend uses a GitHub Actions schedule to check for due announcements approximately every five minutes, set their status to `published`, and record `publishedAt`. The app retrieves published announcements and receives device notifications, subject to device permissions, connectivity, and system delivery. GitHub schedules may be delayed or skipped, so publication times are not guaranteed. **Publish Now** also waits for the next scheduled run. See [GitHub scheduled event limitations](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+- In public repositories, GitHub automatically disables scheduled workflows after 60 days without repository activity. Project administrators should regularly check Actions run history and re-enable disabled workflows from Actions. See [automatic schedule disabling conditions](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule).
+- Only draft and scheduled announcements can be edited. Published announcements can only be archived. Archiving updates only `status` and `updatedAt`.
+- The announcement list synchronizes the latest 200 records in real time, and its statistics cover those same 200 records. There is no demo or mock data.
+- Before saving, the website checks `updatedAt` to avoid overwriting changes another administrator has already saved.
 
-Firestore schema：
+Firestore schema:
 
 ```ts
 {
@@ -90,4 +90,4 @@ Firestore schema：
 }
 ```
 
-新建公告使用伺服器時間設定 `createdAt` / `updatedAt`，`publishedAt` 為 `null`。規則、排程發布與裝置推播功能位於 `firebase/`（App 倉庫為根目錄 `firebase/`，獨立網站倉庫亦放在 `firebase/`）。Firestore Rules 需部署、排程工作流程需另外設定可信任憑證；只發布這個靜態網站不會啟用排程。此方案不使用 Cloud Functions。
+New announcements use server timestamps for `createdAt` and `updatedAt`, with `publishedAt` set to `null`. Firestore Rules, scheduled publishing, and device push notification code are in `firebase/`, at the repository root in both the app repository and this standalone website repository. Deploy the Firestore Rules and configure trusted credentials for the scheduled workflow separately. Deploying the static website alone does not enable scheduled publishing. This setup does not use Cloud Functions.
