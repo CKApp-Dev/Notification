@@ -5,7 +5,7 @@ name: Publish announcements and send notifications
 on:
   schedule:
     # Offset from the busy start of each hour. GitHub schedules are best effort.
-    - cron: '2-57/5 * * * *'
+    - cron: '3-58/5 * * * *'
   workflow_dispatch:
 
 permissions:
