@@ -43,6 +43,7 @@ npm run dev
 - 「排程發布」儲存 `scheduled` 與未來的 `publishAt`。
 - 「立即發布」也儲存 `scheduled`，`publishAt` 設為現在；網站不直接設定 `published`，由可信任的排程後端發布與推播。
 - 後端以 GitHub Actions 排程約每 5 分鐘檢查到期公告並設定 `published` / `publishedAt`，App 會取得已發布公告並收到裝置通知（取決於裝置授權、連線與系統投遞情況）。GitHub 排程可能延遲或略過，無法保證精確發布時間；「立即發布」也會等待下一輪排程。詳見 [GitHub 排程事件限制](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)。
+- 公開倉庫若連續 60 天沒有倉庫活動，GitHub 會自動停用排程工作流程；專案管理者須定期確認 Actions 執行紀錄，停用時從 Actions 重新啟用。詳見 [排程自動停用條件](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)。
 - 只有草稿及排程公告可編輯；已發布公告只能封存。封存時僅更新 `status` 與 `updatedAt`。
 - 公告列表即時同步最近 200 則資料；數字統計也以這 200 則為範圍。沒有示範或假資料。
 - 同時編輯時，儲存前會檢查 `updatedAt`，避免覆寫其他管理員已完成的變更。
