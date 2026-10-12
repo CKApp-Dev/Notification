@@ -14,3 +14,456 @@ img.brand-mark{object-fit:contain;background:#fff;border:1px solid var(--line)}i
 .account-name-line{display:flex;align-items:center;flex-wrap:wrap;gap:5px 8px}.account-role-badge{display:inline-flex;align-items:center;padding:3px 7px;border-radius:5px;font-size:8px;line-height:1.5;font-weight:600;background:#eff2f7;color:#72839b;white-space:nowrap}.account-role-badge.role-owner{background:#e6edfc;color:#416798}.account-role-badge.role-super_admin{background:#f0ebfa;color:#80639f}.account-row-footer>.account-protection{display:flex;align-items:center;gap:5px;line-height:1.8;color:#8192ad;font-size:9px}.invite-role-field{grid-column:1/-1}.account-role-select{display:block;width:100%;min-height:43px;border:1px solid #dde4ee;border-radius:7px;background:#fff;color:#293c5a;padding:11px 13px;font:inherit;font-size:12px;line-height:1.7;outline-offset:4px}.account-role-select:focus{outline:3px solid #e2ebff;border-color:#809fd6}.account-role-select:disabled{background:#f8f9fb;color:#697b95;opacity:1}.account-role-select[aria-invalid=true]{border-color:#c98282}.account-row-actions{flex-wrap:wrap;justify-content:flex-end}.account-row-actions .text-button{min-height:32px}.owner-account>div:last-child{min-width:0}
 @media(max-width:650px){.account-role-select{font-size:16px}.account-role-badge{font-size:8px}.account-row-footer>.account-protection{font-size:8px}.account-row-actions .text-button{min-height:40px}.account-row-heading>.status-badge{flex-shrink:0}.inline-name-fields{flex-wrap:wrap}.inline-name-fields input{flex-basis:100%}.inline-name-fields .button{flex:1;min-height:40px}}
 @media(pointer:coarse){.account-row-actions .text-button{min-height:44px}}
+
+/* Let content shrink and wrap inside cards without clipping controls. */
+.workspace,
+.panel,
+.content-grid > *,
+.accounts-layout > *,
+.gate-wrap > *,
+.field,
+.schedule-note > div,
+.page-heading > div,
+.panel-heading > div {
+  min-width: 0;
+}
+
+.button {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+
+.field input,
+.field textarea,
+.account-role-select {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.stats {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.stat-icon,
+.owner-only {
+  flex-shrink: 0;
+}
+
+.page-heading,
+.panel-heading,
+.filters,
+.label-line,
+.preview-heading,
+.gate-points,
+.gate-footer,
+.workspace-footer {
+  flex-wrap: wrap;
+}
+
+.owner-only,
+.input-count,
+.timezone {
+  white-space: nowrap;
+}
+
+.input-count,
+.timezone {
+  margin-left: auto;
+}
+
+.header-divider {
+  flex-shrink: 0;
+}
+
+.user-email {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.inline-name-fields .button {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.editor-panel {
+  scroll-margin-top: 24px;
+}
+
+.schedule-note {
+  align-items: flex-start;
+}
+
+.schedule-note .button {
+  margin-top: 12px;
+  max-width: 100%;
+}
+
+.gate-wrap {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+}
+
+.gate-points > span {
+  white-space: nowrap;
+}
+
+.gate-footer,
+.workspace-footer {
+  gap: 10px 20px;
+}
+
+/* Publication labels need room even before the panels stack. */
+@media (max-width: 1100px) {
+  .editor-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+
+  .editor-actions > .button {
+    width: 100%;
+  }
+
+  .publish-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    margin: 0;
+  }
+}
+
+/* Stack panels while there is still enough space for readable form fields. */
+@media (max-width: 900px) {
+  .app-header {
+    height: auto;
+    min-height: 76px;
+    flex-wrap: wrap;
+    gap: 0 12px;
+    padding: 16px 24px 0;
+  }
+
+  .app-header .header-divider {
+    display: none;
+  }
+
+  .app-header .user-area {
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .app-header .user-email {
+    display: none;
+  }
+
+  .admin-navigation {
+    order: 3;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 16px;
+    padding: 8px 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .workspace {
+    padding: 28px 24px;
+  }
+
+  .content-grid,
+  .accounts-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 20px;
+  }
+
+  .invite-panel {
+    grid-row: 1;
+  }
+
+  .invite-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 18px;
+  }
+
+  .invite-form .invite-role,
+  .invite-form > .notice,
+  .invite-form > .button,
+  .invite-form > .invite-footnote {
+    grid-column: 1 / -1;
+  }
+
+  .announcement-list {
+    min-height: 0;
+    max-height: 360px;
+  }
+
+  .list-empty,
+  .account-list > .list-empty {
+    min-height: 240px;
+    padding: 30px 20px;
+  }
+
+  .account-list {
+    min-height: 0;
+    max-height: none;
+  }
+
+  .button,
+  .page-heading > .button,
+  .navigation-tab,
+  .icon-button,
+  .filter,
+  .text-button,
+  .editor-actions .button,
+  .account-row-actions .text-button,
+  .inline-name-fields .button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .account-role-select {
+    min-height: 44px;
+  }
+
+  .navigation-tab,
+  .filter {
+    font-size: 12px;
+    padding: 10px 12px;
+  }
+
+  .field input,
+  .field textarea,
+  .account-role-select,
+  .inline-name-fields input {
+    font-size: 16px;
+  }
+
+  .gate-wrap {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 520px;
+    gap: 36px;
+    padding: 36px 24px 50px;
+  }
+
+  .gate-intro h1 {
+    font-size: 32px;
+    line-height: 1.6;
+  }
+
+  .gate-intro h1 br {
+    display: none;
+  }
+
+  .gate-points {
+    gap: 12px 18px;
+    justify-content: space-between;
+  }
+}
+
+@media (max-width: 600px) {
+  .app-header {
+    padding: 14px 16px 0;
+    gap: 0 8px;
+  }
+
+  .app-header .user-area {
+    gap: 2px;
+  }
+
+  .app-header .user-area .admin-tag {
+    display: none;
+  }
+
+  .workspace {
+    padding: 24px 16px;
+  }
+
+  .page-heading {
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .page-heading > .button {
+    width: 100%;
+    min-height: 44px;
+    margin-top: 0;
+    font-size: 12px;
+  }
+
+  .page-heading .muted {
+    font-size: 12px;
+  }
+
+  .stats {
+    gap: 8px;
+  }
+
+  .stat {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 16px 12px;
+    gap: 12px;
+  }
+
+  .stat > div:last-child {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .stat p {
+    margin: 0;
+    font-size: 11px;
+  }
+
+  .stat strong {
+    font-size: 26px;
+  }
+
+  .panel-heading,
+  .editor-panel > .panel-heading,
+  .accounts-list-panel > .panel-heading,
+  .invite-panel > .panel-heading {
+    padding: 20px 18px;
+  }
+
+  .editor-form {
+    padding: 22px 18px 0;
+  }
+
+  .preview-section {
+    padding: 20px 18px;
+  }
+
+  .editor-actions .button {
+    font-size: 12px;
+  }
+
+  .invite-form {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 20px 18px;
+  }
+
+  .filters,
+  .accounts-list-panel .filters {
+    gap: 4px;
+    padding: 0 14px 14px;
+  }
+
+  .schedule-note p,
+  .schedule-note p > span,
+  .field-hint,
+  .field-error,
+  .invite-form .field-hint,
+  .inline-name-form .field-error,
+  .list-footer,
+  .invite-footnote {
+    font-size: 11px;
+  }
+
+  .announcement-row > p,
+  .preview-card > p:not(.preview-date) {
+    font-size: 12px;
+  }
+
+  .owner-title {
+    flex-wrap: wrap;
+  }
+
+  .account-row-footer {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .account-row-actions {
+    width: 100%;
+    justify-content: flex-start;
+    margin-left: 0;
+    gap: 4px 8px;
+  }
+
+  .gate-header {
+    height: auto;
+    min-height: 80px;
+    padding: 20px;
+    gap: 12px;
+  }
+
+  .gate-wrap {
+    padding: 24px 20px 36px;
+    gap: 28px;
+  }
+
+  .gate-intro h1 {
+    font-size: clamp(26px, 7vw, 32px);
+  }
+
+  .gate-intro h1 br {
+    display: initial;
+  }
+
+  .gate-card {
+    padding: 28px 22px;
+  }
+
+  .gate-footer {
+    padding: 20px;
+  }
+}
+
+@media (max-width: 380px) {
+  .publish-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .account-row-heading {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .account-row-heading > .status-badge {
+    grid-column: 2;
+    justify-self: start;
+    margin-left: 0;
+  }
+
+  .phone-preview {
+    padding: 14px 12px;
+  }
+
+  .preview-card {
+    padding: 14px 12px;
+  }
+}
+
+@media (pointer: coarse) {
+  .button,
+  .page-heading > .button,
+  .navigation-tab,
+  .icon-button,
+  .filter,
+  .text-button,
+  .editor-actions .button,
+  .invite-form .button,
+  .account-row-actions .text-button,
+  .inline-name-fields .button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .account-role-select {
+    min-height: 44px;
+  }
+
+  .field input,
+  .field textarea,
+  .account-role-select,
+  .inline-name-fields input {
+    font-size: 16px;
+  }
+}
