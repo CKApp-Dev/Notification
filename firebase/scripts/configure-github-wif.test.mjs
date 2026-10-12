@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { configuration, verifyDedicatedPool, verifyProject, withBinding } from './configure-github-wif.mjs';
 
-test('trust pins numeric repository/owner identities, main, exact workflow and approved event types', () => {
+test('trust pins numeric repository/owner identities, main, exact workflow and manual dispatch', () => {
   const config = configuration('176317633');
   const condition = config.providerConfig.attributeCondition;
   for (const claim of [
@@ -11,8 +11,9 @@ test('trust pins numeric repository/owner identities, main, exact workflow and a
     "assertion.repository == 'CKApp-Dev/Notification'",
     "assertion.ref == 'refs/heads/main'",
     "assertion.workflow_ref == 'CKApp-Dev/Notification/.github/workflows/announcements.yml@refs/heads/main'",
-    "assertion.event_name in ['schedule', 'workflow_dispatch']",
+    "assertion.event_name == 'workflow_dispatch'",
   ]) assert.ok(condition.includes(claim));
+  assert.ok(!condition.includes("'schedule'"));
   assert.equal(config.providerConfig.oidc.issuerUri, 'https://token.actions.githubusercontent.com');
   assert.deepEqual(config.providerConfig.oidc.allowedAudiences, []);
   assert.equal(config.principal, 'principalSet://iam.googleapis.com/projects/253500838094/locations/global/workloadIdentityPools/github-announcements/attribute.repository_id/1413866797');

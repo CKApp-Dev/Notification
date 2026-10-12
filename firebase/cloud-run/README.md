@@ -1,53 +1,47 @@
-# Prepared Cloud Scheduler replacement
+# Publish only from administrator actions
 
-This alternative runs the existing `firebase/worker` through an authenticated Cloud Run service every five minutes. It is prepared for review only; no cloud resources or billing settings have been changed. Applying the deployment script enables the required APIs and creates resources. It never links billing or changes the existing GitHub schedule.
+The admin website calls `POST /run` once when an administrator presses **立即發布** or **處理待發布公告與通知**. The service runs the existing bounded worker and awaits that pass. It has no timer, startup execution, automatic retry or Scheduler job. Drafts and future publication-time saves do not call it. Future-dated announcements require a manual processing action after their due time.
 
-The adapter accepts only `POST /run`, awaits the bounded worker pass, and returns HTTP 500 on failure so Scheduler can retry. Provider exceptions are not logged by the adapter. Cloud Run IAM authenticates callers before requests reach Node; no custom JWT code or service-account keys are needed. The server preserves the worker's optional `EXPO_ACCESS_TOKEN` setting. That secret is absent and unnecessary in the currently verified deployment.
+## Authentication
 
-## Target and prerequisites
+Cloud Run accepts browser transport using `--no-invoker-iam-check`; the application rejects work without a valid Firebase ID token and server-side administrator authorization. Every POST verifies the token for `ck-app-database`, then checks trusted owner claims or the verified Google user's current enabled `adminAccounts` membership with role `admin` or `super_admin`. A standalone admin claim does not grant access. Disabling or deleting a membership denies subsequent worker requests even with an existing token. Owner claim changes take effect when the old token expires. See [Firebase ID-token verification](https://firebase.google.com/docs/auth/admin/verify-id-tokens) and [Cloud Run transport access](https://docs.cloud.google.com/run/docs/authenticating/public).
 
-All commands are pinned to project `ck-app-database`, number `253500838094`, service `ck-announcements`, region `us-central1`. Firestore is in US multi-region `nam5`, so `us-central1` is a nearby compute region. The script checks the project number before making changes.
+CORS is pinned to `https://notification.cksc.tw`. Preflight requests never invoke work. No service-account key or operator token is sent to the browser. Provider/token error details are redacted. The runtime uses its existing service-account Firestore permissions. Optional `EXPO_ACCESS_TOKEN` remains server-side.
 
-**Billing approval is required before apply.** The project currently has billing disabled. Linking a billing account automatically upgrades its Firebase plan from Spark to Blaze. The script refuses deployment while billing is disabled and never links billing itself. [Firebase billing plans](https://firebase.google.com/docs/projects/billing/firebase-pricing-plans)
+## Deployment
 
-The operator needs API enablement, Cloud Run/Scheduler/Build/Artifact Registry and storage resource administration, IAM policy updates, and permission to act as the attached service accounts. Project Owner plus Service Account User on the attached identities covers project setup; linking billing separately requires billing-account permission. Existing Google-managed service-agent roles must remain intact. [Cloud Run deployment permissions](https://docs.cloud.google.com/run/docs/deploying-source-code), [Scheduler authentication](https://docs.cloud.google.com/scheduler/docs/http-target-auth)
+The target is pinned to project `ck-app-database`, number `253500838094`, service `ck-announcements`, region `us-central1`. The script checks project identity and refuses to deploy without an enabled billing account. It never links billing itself. Changes to source do not alter live resources.
 
-## Review and deployment
-
-From the repository root, print the proposed commands without gcloud, credentials or network:
+Print the proposed commands without credentials or network:
 
 ```sh
 sh firebase/cloud-run/deploy.sh
 ```
 
-Only after billing and deployment approval, apply with a current gcloud CLI and one short-lived operator OAuth token piped through stdin to `sh firebase/cloud-run/deploy.sh --apply`. Use the existing private token retrieval flow; never paste the token into command arguments or commit it. [gcloud supports access-token environment authentication](https://docs.cloud.google.com/sdk/docs/authenticate).
+Apply only with authorized deployment and already enabled billing, using a short-lived operator OAuth token piped through stdin to `sh firebase/cloud-run/deploy.sh --apply`. Never put tokens in arguments or files. The script disables tracing/file logs, isolates temporary CLI settings, removes them on exit, builds the allowlisted worker files, and deploys a non-root container by immutable image digest. It never calls `/run` or starts a worker pass during deployment. It does not create a Scheduler service account, enable the Scheduler API or create a job.
 
-Apply disables shell tracing and file logs, isolates gcloud settings in a temporary directory, and removes that directory on exit. The token stays in process memory/environment and is not written to a credential/config file. It also works when stdin ends without a newline. The script does not log the token. Apply can leave created cloud resources in place if a later command fails; inspect them before retrying. It refuses to overwrite an existing Scheduler job.
+The service uses request-based CPU billing, one CPU, 512 MiB, concurrency one, minimum zero instances, maximum one instance and a 240-second request timeout. Builds, storage, Firestore, requests and logs remain billable; there is no fixed five-minute processing loop. The build identity receives image-writer, source-viewer and log-writer access; the runtime retains its existing Firestore role. [Cloud Run pricing](https://cloud.google.com/run/pricing)
 
-The new identities separate access:
+Set the public GitHub repository variable `VITE_ANNOUNCEMENTS_WORKER_URL` to the HTTPS `/run` URL printed by deployment, then rebuild the Pages site. For local website development the same public value may go in `.env.local`. The browser accepts only an HTTPS `*.run.app/run` endpoint and never follows redirects with its ID token. Without valid configuration, publication buttons stay disabled and saves remain available.
 
-| Identity | Granted access |
-| --- | --- |
-| Existing `ck-announcements` | Existing Firestore data role; no new runtime privileges |
-| `ck-announcements-scheduler` | Cloud Run Invoker on this service only |
-| `ck-announcements-build` | Artifact Registry Writer on this image repository; Object Viewer on this source bucket; Logs Writer on this project |
+## Retire existing periodic triggers
 
-Cloud Build uses the repository root as context, with the allowlist in `.gcloudignore`. Docker uses `Dockerfile.dockerignore` for the same bounded source selection. Neither uploads frontend files, `.git`, local dependencies, environment files, or credentials. Review an upload list with `gcloud meta list-files-for-upload --ignore-file=firebase/cloud-run/.gcloudignore` from the repository root before apply. The existing worker source is used directly without a copied implementation. The multi-stage Node 22 image runs as a non-root user and is deployed by immutable image digest.
+Deploying new code cannot remove an already configured external trigger. Remove the old GitHub cron by updating the default branch to the manual-only workflow. If the previous Cloud Scheduler job exists, pause it separately before considering the rollout complete:
 
-The service uses request-based billing, one CPU, 512 MiB memory, concurrency one, zero minimum instances, maximum one instance and a 240-second request timeout. Scheduler sends OIDC with the service base URL as its audience and `/run` as its target path. Existing Firestore transactions, leases and checkpoints protect against repeated or overlapping delivery. [Scheduler delivery behavior](https://docs.cloud.google.com/scheduler/docs/overview)
+```sh
+gcloud scheduler jobs pause ck-announcements --project=ck-app-database --location=us-central1
+```
 
-## Cost and validation
+The deployment script intentionally does not touch live Scheduler jobs. Ensure no other automated invoker targets this service. No live deployment, billing change, notification send or schedule pause was performed during source preparation.
 
-One Scheduler job is free within the first three jobs per billing account, then US$0.10/month. At 8,640 invocations per 30 days, short worker passes may fit unused Cloud Run compute/request allowances. This is an estimate, not a zero-cost guarantee; Firestore, network, builds, logs and image/source storage can add charges. [Scheduler pricing](https://cloud.google.com/scheduler/pricing), [Cloud Run pricing](https://cloud.google.com/run/pricing)
-
-Offline checks:
+## Validation and remaining work
 
 ```sh
 node --test firebase/cloud-run/*.test.cjs
 sh -n firebase/cloud-run/deploy.sh
 npm --prefix firebase test
+npm test
+npm run build
 ```
 
-Adapter tests cover completion timing, method/path restrictions and failure redaction. Mocked deployment tests verify project/billing rejection before mutation, stdin EOF handling, token redaction and temporary-state cleanup. Source allowlists were checked against required files and excluded environment, credential, dependency and frontend paths using Git ignore semantics.
-
-No container build was performed because the local Docker daemon is unavailable. No live Cloud Run, Cloud Scheduler or billing changes were performed. After approved deployment, inspect the manually requested Scheduler execution, HTTP 200 and worker log; then observe two actual scheduled executions and verify a due announcement. Retire GitHub cron only after those checks pass. Scheduler improves delivery/retries but does not guarantee an exact publication timestamp.
+Use mocks/emulators for offline tests. A live check requires an explicitly chosen test announcement/device: page load and draft/future saves make no worker request; Publish makes exactly one authenticated POST; unauthorized/disabled accounts cannot start work. Confirm the published row separately from push acceptance/display. A worker pass can leave large jobs, backoff retries or receipts for a later button press; receipt checks begin 15 minutes after acceptance. Manual retries preserve existing outbox jobs and accepted-recipient checkpoints.

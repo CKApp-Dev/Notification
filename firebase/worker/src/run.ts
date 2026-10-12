@@ -3,7 +3,7 @@ import { Expo } from 'expo-server-sdk';
 import { checkNotificationReceipts, dispatchNotifications, PushGateway } from './delivery';
 import { publishDueAnnouncements } from './publisher';
 
-/** A single bounded pass. The external scheduler invokes this again for remaining work. */
+/** A single bounded pass. An administrator explicitly invokes another pass for remaining work. */
 export async function runNotificationWorker(db: Firestore, gateway: PushGateway): Promise<void> {
   const published = await publishDueAnnouncements(db);
   console.info('Announcements published', { count: published });

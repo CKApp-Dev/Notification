@@ -47,7 +47,7 @@ export function configuration(ownerId) {
     `assertion.repository == '${REPOSITORY}'`,
     "assertion.ref == 'refs/heads/main'",
     `assertion.workflow_ref == '${REPOSITORY}/.github/workflows/announcements.yml@refs/heads/main'`,
-    "assertion.event_name in ['schedule', 'workflow_dispatch']",
+    "assertion.event_name == 'workflow_dispatch'",
   ].join(' && ');
   return {
     projectId: PROJECT_ID, projectNumber: PROJECT_NUMBER,

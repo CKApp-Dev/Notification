@@ -1,7 +1,7 @@
 import { Firestore, Timestamp } from 'firebase-admin/firestore';
 import { shouldPublish } from './policy';
 
-/** Re-check inside the transaction: concurrent scheduler runs create one outbox job. */
+/** Re-check inside the transaction: concurrent manual runs create one outbox job. */
 export async function publishDueAnnouncements(db: Firestore, now = Timestamp.now()): Promise<number> {
   const due = await db.collection('announcements')
     .where('status', '==', 'scheduled').where('publishAt', '<=', now)

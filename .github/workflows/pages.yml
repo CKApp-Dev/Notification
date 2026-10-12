@@ -42,6 +42,7 @@ jobs:
         run: npm run build
         env:
           ADMIN_BASE_PATH: ${{ steps.pages.outputs.base_path }}/
+          VITE_ANNOUNCEMENTS_WORKER_URL: ${{ vars.VITE_ANNOUNCEMENTS_WORKER_URL }}
       - name: Upload website artifact
         uses: actions/upload-pages-artifact@v4
         with:

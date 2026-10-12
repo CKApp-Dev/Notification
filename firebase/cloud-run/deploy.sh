@@ -49,21 +49,18 @@ esac
 PROJECT='ck-app-database'
 REGION='us-central1'
 WORKER_SA='ck-announcements@ck-app-database.iam.gserviceaccount.com'
-SCHEDULER_SA='ck-announcements-scheduler@ck-app-database.iam.gserviceaccount.com'
 BUILD_SA='ck-announcements-build@ck-app-database.iam.gserviceaccount.com'
 SOURCE_BUCKET='gs://ck-app-database-announcement-build-source'
 IMAGE='us-central1-docker.pkg.dev/ck-app-database/ck-announcements/worker'
 WORKER_TAG='candidate'
 
-gcloud services enable run.googleapis.com cloudscheduler.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com --project="$PROJECT"
+gcloud services enable run.googleapis.com cloudbuild.googleapis.com artifactregistry.googleapis.com --project="$PROJECT"
 
 gcloud artifacts repositories describe ck-announcements --project="$PROJECT" --location="$REGION" >/dev/null 2>&1 ||
   gcloud artifacts repositories create ck-announcements --project="$PROJECT" --location="$REGION" --repository-format=docker
 
 gcloud iam service-accounts describe "$BUILD_SA" --project="$PROJECT" >/dev/null 2>&1 ||
   gcloud iam service-accounts create ck-announcements-build --project="$PROJECT" --display-name='Announcement image builder'
-gcloud iam service-accounts describe "$SCHEDULER_SA" --project="$PROJECT" >/dev/null 2>&1 ||
-  gcloud iam service-accounts create ck-announcements-scheduler --project="$PROJECT" --display-name='Announcement schedule invoker'
 gcloud iam service-accounts describe "$WORKER_SA" --project="$PROJECT" >/dev/null
 
 gcloud artifacts repositories add-iam-policy-binding ck-announcements --project="$PROJECT" --location="$REGION" --member="serviceAccount:$BUILD_SA" --role=roles/artifactregistry.writer >/dev/null
@@ -77,14 +74,11 @@ gcloud builds submit "$REPO_ROOT" --project="$PROJECT" --region="$REGION" --conf
 DIGEST=$(gcloud artifacts docker images describe "$IMAGE:$WORKER_TAG" --project="$PROJECT" --format='value(image_summary.digest)')
 case "$DIGEST" in sha256:*) ;; *) printf '%s\n' 'Image digest missing; refusing deployment.' >&2; exit 1 ;; esac
 
-gcloud run deploy ck-announcements --project="$PROJECT" --region="$REGION" --image="$IMAGE@$DIGEST" --service-account="$WORKER_SA" --set-env-vars=GOOGLE_CLOUD_PROJECT=ck-app-database --cpu=1 --memory=512Mi --concurrency=1 --max-instances=1 --min-instances=0 --timeout=240s --cpu-throttling --no-cpu-boost --no-allow-unauthenticated --invoker-iam-check
-gcloud run services add-iam-policy-binding ck-announcements --project="$PROJECT" --region="$REGION" --member="serviceAccount:$SCHEDULER_SA" --role=roles/run.invoker >/dev/null
+# The browser sends a Firebase ID token; auth.cjs authorizes enabled admins.
+# Public transport does not grant IAM roles to allUsers. No work runs at startup.
+gcloud run deploy ck-announcements --project="$PROJECT" --region="$REGION" --image="$IMAGE@$DIGEST" --service-account="$WORKER_SA" --set-env-vars=GOOGLE_CLOUD_PROJECT=ck-app-database --cpu=1 --memory=512Mi --concurrency=1 --max-instances=1 --min-instances=0 --timeout=240s --cpu-throttling --no-cpu-boost --no-invoker-iam-check
 SERVICE_URL=$(gcloud run services describe ck-announcements --project="$PROJECT" --region="$REGION" --format='value(status.url)')
-case "$SERVICE_URL" in https://*.run.app) ;; *) printf '%s\n' 'Unexpected service URL; refusing schedule creation.' >&2; exit 1 ;; esac
-
-# Do not overwrite an existing scheduler job without reviewing its identity/configuration.
-gcloud scheduler jobs create http ck-announcements --project="$PROJECT" --location="$REGION" --schedule='*/5 * * * *' --time-zone=Asia/Taipei --uri="$SERVICE_URL/run" --http-method=post --message-body='{}' --oidc-service-account-email="$SCHEDULER_SA" --oidc-token-audience="$SERVICE_URL" --attempt-deadline=240s --max-retry-attempts=3 --max-retry-duration=240s --min-backoff=10s --max-backoff=60s --max-doublings=2
-
-# This verifies the scheduler's authentication path. Scheduled verification still follows.
-gcloud scheduler jobs run ck-announcements --project="$PROJECT" --location="$REGION"
-printf '%s\n' 'Inspect Cloud Run request/worker logs and two actual five-minute scheduled invocations before disabling GitHub cron.'
+case "$SERVICE_URL" in https://*.run.app) ;; *) printf '%s\n' 'Unexpected service URL; refusing frontend configuration.' >&2; exit 1 ;; esac
+printf '%s\n' 'Deployment complete. Configure the admin website and rebuild it with:'
+printf 'VITE_ANNOUNCEMENTS_WORKER_URL=%s/run\n' "$SERVICE_URL"
+printf '%s\n' 'Publication and push delivery start only when an authorized admin uses Publish. Deployment does not invoke the worker.'

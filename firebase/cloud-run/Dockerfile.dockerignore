@@ -10,4 +10,5 @@
 !firebase/cloud-run/
 !firebase/cloud-run/Dockerfile
 !firebase/cloud-run/adapter.cjs
+!firebase/cloud-run/auth.cjs
 !firebase/cloud-run/server.cjs

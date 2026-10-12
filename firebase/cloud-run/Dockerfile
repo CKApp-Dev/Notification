@@ -11,6 +11,6 @@ ENV NODE_ENV=production
 WORKDIR /app
 COPY --from=build --chown=node:node /app/lib ./lib
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
-COPY --chown=node:node firebase/cloud-run/adapter.cjs firebase/cloud-run/server.cjs ./
+COPY --chown=node:node firebase/cloud-run/adapter.cjs firebase/cloud-run/auth.cjs firebase/cloud-run/server.cjs ./
 USER node
 CMD ["node", "server.cjs"]

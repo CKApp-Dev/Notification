@@ -3,9 +3,6 @@
 name: Publish announcements and send notifications
 
 on:
-  schedule:
-    # Offset from the busy start of each hour. GitHub schedules are best effort.
-    - cron: '3-58/5 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -18,7 +15,7 @@ concurrency:
 
 jobs:
   announcements:
-    if: github.repository == 'CKApp-Dev/Notification' && github.repository_id == '1413866797' && github.repository_owner_id == '176317633' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'workflow_dispatch' && github.repository == 'CKApp-Dev/Notification' && github.repository_id == '1413866797' && github.repository_owner_id == '176317633' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

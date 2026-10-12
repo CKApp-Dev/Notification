@@ -2,10 +2,16 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { GoogleAuthProvider, getRedirectResult, onIdTokenChanged, signInWithPopup, signInWithRedirect, signOut, type User } from 'firebase/auth';
 import { addDoc, collection, doc, limit, onSnapshot, orderBy, query, runTransaction, serverTimestamp, Timestamp, type DocumentData } from 'firebase/firestore';
 import { auth, db, friendlyError, missingConfig, redirectEnabled } from './firebase';
+import { createManualPublisher, publicationEndpoint } from './publication';
+
 import { Brand, Icon } from './ui';
 import { deriveAccess, ROLE_LABELS, type AccountRole } from './accounts-domain';
 import AccountManagement from './AccountManagement';
 import { editorFor, emptyEditor, formatDate, STATUS_LABELS, validateEditor, type Announcement, type AnnouncementStatus, type EditorValues, type SaveAction } from './domain';
+
+const workerEndpoint = import.meta.env.VITE_ANNOUNCEMENTS_WORKER_URL ?? '';
+const publicationConfigured = publicationEndpoint(workerEndpoint) !== null;
+const processPublications = createManualPublisher(workerEndpoint);
 
 function Gate({ children }: { children: ReactNode }) {
   return <div className="gate-page"><header className="gate-header"><Brand /><span className="header-label">公告管理平台</span></header><main className="gate-wrap"><div className="gate-intro"><p className="eyebrow">CONNECTED CAMPUS</p><h1>讓重要消息，<br />傳遞到位。</h1><p>從一則校園消息到每個人的手機，<br />在這裡建立、排程與管理 CK APP 公告</p><div className="gate-points"><span><Icon name="file" />編輯公告</span><span><Icon name="clock" />預約發布</span><span><Icon name="bell" />手機通知</span></div><span className="gate-grid" aria-hidden="true" /></div><section className="gate-card">{children}</section></main><footer className="gate-footer">CK APP · 你的校園助理<span>僅供授權管理員使用</span></footer></div>;
@@ -149,7 +155,7 @@ function Dashboard({ user, authError }: { user: User; authError: string }) {
   useEffect(() => {
     setLoading(true); setListError('');
     return onSnapshot(query(collection(db!, 'announcements'), orderBy('createdAt', 'desc'), limit(200)), snapshot => {
-      const records = snapshot.docs.map(item => decodeAnnouncement(item.id, item.data())).filter((item): item is Announcement => item !== null);
+      const records = snapshot.docs.map(item => decodeAnnouncement(item.id, item.data({ serverTimestamps: 'estimate' }))).filter((item): item is Announcement => item !== null);
       setRows(records); setLoading(false);
       setListError(records.length !== snapshot.docs.length ? '部分公告格式不正確，請由專案管理者檢查資料。' : '');
     }, error => { setRows([]); setLoading(false); setListError(friendlyError(error)); });
@@ -174,7 +180,7 @@ function Dashboard({ user, authError }: { user: User; authError: string }) {
     setErrors(previous => ({ ...previous, [field]: undefined }));
   }
   async function save(action: SaveAction) {
-    if (busy || !editable) return;
+    if (busy || !editable || (action === 'now' && !publicationConfigured)) return;
     const result = validateEditor(values, action);
     setErrors(result.errors); setActionError(''); setSuccess('');
     if (Object.keys(result.errors).length) {
@@ -182,7 +188,7 @@ function Dashboard({ user, authError }: { user: User; authError: string }) {
     }
     setSaving(true);
     try {
-      const data = { title: result.data.title, body: result.data.body, url: result.data.url, status: result.data.status, publishAt: Timestamp.fromDate(result.data.publishAt), updatedAt: serverTimestamp() };
+      const data = { title: result.data.title, body: result.data.body, url: result.data.url, status: result.data.status, publishAt: action === 'now' ? serverTimestamp() : Timestamp.fromDate(result.data.publishAt), updatedAt: serverTimestamp() };
       let savedId = selectedId;
       if (selectedId) {
         await runTransaction(db!, async transaction => {
@@ -197,11 +203,29 @@ function Dashboard({ user, authError }: { user: User; authError: string }) {
         savedId = created.id;
       }
       setSelectedId(savedId); setDirty(false);
-      setSuccess(action === 'draft' ? '草稿已儲存。' : action === 'now' ? '已加入發布佇列，尚未發布。發布服務完成處理後才會顯示於 App；發布與推播服務須先完成設定。' : '排程已儲存，尚未發布。發布服務須先完成設定，並在指定時間後完成處理，才會顯示於 App；裝置通知另須完成推播設定。');
+      if (action === 'now') {
+        try {
+          await processPublications(user);
+          setSuccess('已完成一次發布處理，請在列表確認公告狀態。尚未完成的通知可按「處理待發布公告與通知」繼續。');
+        } catch (error) {
+          setActionError(`公告已儲存，發布處理尚未確認完成。${friendlyError(error)}；請按「處理待發布公告與通知」重試，無須重新建立公告。`);
+        }
+      } else {
+        setSuccess(action === 'draft' ? '草稿已儲存。' : '待發布時間已儲存。到期後請按「處理待發布公告與通知」；公告不會自動發布。');
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
       setActionError(message === 'content-published' ? '這則公告已發布或封存，無法繼續編輯。請重新選取公告。' : message === 'content-changed' ? '其他管理員已更新這則公告。請重新選取並確認最新內容後再編輯。' : friendlyError(error));
     } finally { setSaving(false); }
+  }
+  async function processPending() {
+    if (busy || !publicationConfigured) return;
+    setSaving(true); setActionError(''); setSuccess('');
+    try {
+      await processPublications(user);
+      setSuccess('已完成一次發布處理，請在列表確認公告狀態。尚未完成的通知可稍後再次處理。');
+    } catch (error) { setActionError(`發布處理尚未確認完成。${friendlyError(error)}；請稍後再按一次重試。`); }
+    finally { setSaving(false); }
   }
   async function archive() {
     if (!selectedId || busy || selected?.status !== 'published') return;
@@ -221,8 +245,8 @@ function Dashboard({ user, authError }: { user: User; authError: string }) {
 
   return <>
     <main className="workspace"><div className="page-heading"><div><p className="eyebrow">ANNOUNCEMENTS</p><h1>每個重要消息，都在這裡。</h1><p className="muted">管理 App 首頁公告，輕鬆安排校園消息的發布時間。</p></div><button className="button primary" onClick={() => openAnnouncement(null)} disabled={saving}><Icon name="plus" />建立公告</button></div>
-      <div className="stats"><Stat icon="bell" label="已發布" value={rows.filter(row => row.status === 'published').length} detail="正在 App 中顯示" /><Stat icon="clock" label="已排程" value={rows.filter(row => row.status === 'scheduled').length} detail="等待發布處理" /><Stat icon="file" label="草稿" value={rows.filter(row => row.status === 'draft').length} detail="持續醞釀的消息" /></div>
-      <div className="schedule-note"><span className="note-icon"><Icon name="clock" size={17} /></span><p>提交或排程後，公告會先進入待發布狀態。<span>時間均為台北時間（UTC+8）。發布服務須先完成設定；啟用後約每 5 分鐘處理一次，排程可能延遲。實際發布後才會顯示於 App；裝置通知另須完成推播設定。</span></p></div>
+      <div className="stats"><Stat icon="bell" label="已發布" value={rows.filter(row => row.status === 'published').length} detail="正在 App 中顯示" /><Stat icon="clock" label="已排程" value={rows.filter(row => row.status === 'scheduled').length} detail="到期後須手動發布" /><Stat icon="file" label="草稿" value={rows.filter(row => row.status === 'draft').length} detail="持續醞釀的消息" /></div>
+      <div className="schedule-note"><span className="note-icon"><Icon name="clock" size={17} /></span><div><p>按「立即發布」才會啟動發布與通知處理。<span>時間均為台北時間（UTC+8）。儲存草稿與待發布時間不會啟動發布；到期後須手動處理。每次處理也會繼續已到期公告與未完成的通知；通知送達仍取決於裝置權限與系統。</span></p><button type="button" className="button secondary" onClick={() => void processPending()} disabled={busy || !publicationConfigured}>{saving ? '正在處理…' : '處理待發布公告與通知'}</button>{!publicationConfigured && <p className="small muted">發布服務尚未連線，請聯絡專案管理者；目前可儲存草稿與待發布時間。</p>}</div></div>
       {authError && <p className="notice error" role="alert">{authError}</p>}
       <div className="content-grid"><section className="panel list-panel" aria-labelledby="list-title"><div className="panel-heading"><h2 id="list-title">公告列表 <span className="count">{rows.length}</span></h2><span className="live-dot">即時同步</span></div><div className="filters" role="group" aria-label="依公告狀態篩選">{filters.map(item => <button key={item} className={filter === item ? 'filter active' : 'filter'} aria-pressed={filter === item} onClick={() => setFilter(item)}>{item === 'all' ? '全部' : STATUS_LABELS[item]}</button>)}</div>
         <div className="announcement-list" aria-live="polite">{loading ? <div className="list-empty"><span className="spinner" /><p>正在載入公告…</p></div> : listError ? <div className="list-empty"><Icon name="refresh" size={32} /><p className="notice error" role="alert">{listError}</p><button className="button secondary" onClick={() => setRetry(previous => previous + 1)}>重新載入</button></div> : visible.length === 0 ? <div className="list-empty"><div className="empty-icon"><Icon name="file" size={28} /></div><h3>{filter === 'all' ? '第一則消息，從這裡開始' : `目前沒有${STATUS_LABELS[filter]}公告`}</h3><p>{filter === 'all' ? '建立一則公告，與同學分享校園的新鮮事。' : '符合這個狀態的公告會顯示在這裡。'}</p>{filter === 'all' && <button className="text-button" onClick={() => openAnnouncement(null)}>建立第一則公告 <Icon name="arrow" size={16} /></button>}</div> : visible.map(row => <button className={`announcement-row ${selectedId === row.id ? 'selected' : ''}`} key={row.id} onClick={() => openAnnouncement(row)} aria-pressed={selectedId === row.id}><div className="row-top"><StatusBadge status={row.status} /><span className="row-date">{formatDate(row.status === 'published' ? row.publishedAt : row.publishAt)}</span></div><h3>{row.title}</h3><p>{row.body}</p><div className="row-bottom"><span>{row.status === 'draft' ? '繼續編輯' : row.status === 'scheduled' ? '檢視排程' : '檢視公告'}</span><Icon name="arrow" size={16} /></div></button>)}</div><div className="list-footer">顯示最近 200 則公告 · 台北時間</div>
@@ -232,10 +256,10 @@ function Dashboard({ user, authError }: { user: User; authError: string }) {
           <fieldset disabled={!editable || saving}><div className="field"><div className="label-line"><label htmlFor="title">公告標題 <span className="required">*</span></label><span className="input-count">{values.title.length} / 120</span></div><input ref={titleInput} id="title" value={values.title} placeholder="用一句話，說出重要的事" maxLength={120} onChange={event => change('title', event.target.value)} aria-invalid={!!errors.title} aria-describedby={errors.title ? 'title-error' : undefined} required />{errors.title && <span id="title-error" className="field-error">{errors.title}</span>}</div>
           <div className="field"><div className="label-line"><label htmlFor="body">公告內容 <span className="required">*</span></label><span className="input-count">{values.body.length.toLocaleString()} / 10,000</span></div><textarea id="body" value={values.body} rows={7} placeholder="告訴同學消息的詳細內容、時間與注意事項…" maxLength={10_000} onChange={event => change('body', event.target.value)} aria-invalid={!!errors.body} aria-describedby={errors.body ? 'body-error' : undefined} required />{errors.body && <span id="body-error" className="field-error">{errors.body}</span>}</div>
           <div className="field"><div className="label-line"><label htmlFor="url">延伸連結 <span className="optional">選填</span></label></div><input id="url" type="url" value={values.url} placeholder="https://" maxLength={2048} onChange={event => change('url', event.target.value)} aria-invalid={!!errors.url} aria-describedby={errors.url ? 'url-error' : 'url-help'} />{errors.url ? <span id="url-error" className="field-error">{errors.url}</span> : <span id="url-help" className="field-hint">加入活動頁面、報名表或其他 HTTPS 連結，最多 2,048 個字元。</span>}</div>
-          <div className="field"><div className="label-line"><label htmlFor="publishTime">發布時間</label><span className="timezone">Asia/Taipei · UTC+8</span></div><input id="publishTime" type="datetime-local" value={values.publishTime} onChange={event => change('publishTime', event.target.value)} aria-invalid={!!errors.publishTime} aria-describedby={errors.publishTime ? 'time-error' : 'time-help'} />{errors.publishTime ? <span id="time-error" className="field-error">{errors.publishTime}</span> : <span id="time-help" className="field-hint">排程前請確認日期與時間；草稿不會自動發布。</span>}</div></fieldset>
+          <div className="field"><div className="label-line"><label htmlFor="publishTime">發布時間</label><span className="timezone">Asia/Taipei · UTC+8</span></div><input id="publishTime" type="datetime-local" value={values.publishTime} onChange={event => change('publishTime', event.target.value)} aria-invalid={!!errors.publishTime} aria-describedby={errors.publishTime ? 'time-error' : 'time-help'} />{errors.publishTime ? <span id="time-error" className="field-error">{errors.publishTime}</span> : <span id="time-help" className="field-hint">儲存待發布時間後不會自動發布；到期後請手動處理。</span>}</div></fieldset>
           {!editable && <div className="notice neutral" role="status"><p>{selected?.status === 'archived' ? '這則公告已封存，App 中不再顯示。' : selected?.status === 'published' ? '這則公告已發布，內容無法再編輯。需要下架時，可將它封存。' : '公告狀態已更新，請重新選取公告。'}</p>{dirty && selected && <><p>畫面保留了尚未儲存的變更，這些變更並未發布。請載入已儲存內容，確認實際公告。</p><button type="button" className="text-button" onClick={() => openAnnouncement(selected)} disabled={saving}>載入已儲存內容 <Icon name="refresh" size={15} /></button></>}</div>}
           {actionError && <p className="notice error" role="alert">{actionError}</p>}{success && <p className="notice success" role="status"><Icon name="check" size={17} />{success}</p>}
-          <div className="editor-actions">{editable ? <><button type="submit" className="button secondary" disabled={busy}>儲存草稿</button><div className="publish-actions"><button type="button" className="button secondary" onClick={() => void save('now')} disabled={busy}>提交發布</button><button type="button" className="button primary" onClick={() => void save('schedule')} disabled={busy}><Icon name="clock" size={17} />{saving ? '正在儲存…' : '排程發布'}</button></div></> : selected?.status === 'published' ? <button type="button" className="button secondary" onClick={() => void archive()} disabled={busy}><Icon name="archive" />封存公告</button> : null}</div>
+          <div className="editor-actions">{editable ? <><button type="submit" className="button secondary" disabled={busy}>儲存草稿</button><div className="publish-actions"><button type="button" className="button secondary" onClick={() => void save('now')} disabled={busy || !publicationConfigured}>{saving ? '正在處理…' : '立即發布'}</button><button type="button" className="button primary" onClick={() => void save('schedule')} disabled={busy}><Icon name="clock" size={17} />{saving ? '正在儲存…' : '儲存待發布時間'}</button></div></> : selected?.status === 'published' ? <button type="button" className="button secondary" onClick={() => void archive()} disabled={busy}><Icon name="archive" />封存公告</button> : null}</div>
         </form>
         <div className="preview-section"><div className="preview-heading"><h3>App 顯示預覽</h3><span>{dirty && !editable ? '尚未儲存的內容' : '內容樣式參考'}</span></div><div className="phone-preview"><div className="preview-app-title"><img className="preview-small-mark" src={`${import.meta.env.BASE_URL}icon.png`} alt="CK APP" /><span>最新消息</span><span className="preview-sample">預覽</span></div><article className="preview-card"><p className="preview-date"><Icon name="bell" size={14} />{values.publishTime ? formatDate(validateEditor(values, 'draft').data.publishAt) : '發布日期'}</p><h4>{values.title.trim() || '你的公告標題'}</h4><p className={!values.body.trim() ? 'placeholder' : ''}>{values.body.trim() || '公告內容將顯示在這裡。讓重要資訊清楚、簡單地被看見。'}</p>{values.url.trim() && <span className="preview-link">查看詳細資訊 <Icon name="arrow" size={15} /></span>}</article></div></div>
       </section></div>
